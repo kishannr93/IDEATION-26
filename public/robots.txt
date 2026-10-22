@@ -1,0 +1,7 @@
+# IDEATION 2026 - robots.txt
+User-agent: *
+Allow: /
+Disallow: /admin
+Disallow: /api/
+
+Sitemap: https://ideation2026.bietdvg.edu/sitemap.xml

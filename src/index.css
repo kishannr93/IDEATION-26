@@ -1,0 +1,187 @@
+@import "tailwindcss";
+
+@layer base {
+  :root {
+    --bg-main: #050B1A;
+    --surface: #0C1630;
+    --surface-hover: #132247;
+    --cyan: #35E0FF;
+    --blue: #3A7BFF;
+    --magenta: #FF4FD8;
+    --purple: #8A5CFF;
+    --orange-primary: #FF8A2A;
+    --orange-secondary: #F5611A;
+    --gold: #FFC83D;
+    --text-primary: #F2F6FF;
+    --text-muted: #9DB0D0;
+    --border-glow: rgba(53, 224, 255, 0.22);
+    --border-subtle: rgba(120, 170, 255, 0.14);
+  }
+
+  body {
+    background-color: var(--bg-main);
+    color: var(--text-primary);
+    font-family: 'Inter', sans-serif;
+  }
+
+  h1, h2, h3, .font-display {
+    font-family: 'Orbitron', sans-serif;
+  }
+
+  .font-tech {
+    font-family: 'Rajdhani', sans-serif;
+  }
+
+  .font-mono, code, .tabular-nums {
+    font-family: 'JetBrains Mono', monospace;
+  }
+}
+
+/* Custom Scrollbar */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-track {
+  background: #050B1A;
+}
+::-webkit-scrollbar-thumb {
+  background: #1a2a52;
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #35E0FF;
+}
+
+/* Neon Glow utilities */
+.glow-cyan {
+  box-shadow: 0 0 25px -4px rgba(53, 224, 255, 0.45);
+}
+.glow-orange {
+  box-shadow: 0 0 25px -4px rgba(255, 138, 42, 0.45);
+}
+.glow-magenta {
+  box-shadow: 0 0 25px -4px rgba(255, 79, 216, 0.45);
+}
+.glow-gold {
+  box-shadow: 0 0 25px -4px rgba(255, 200, 61, 0.4);
+}
+.text-glow-cyan {
+  text-shadow: 0 0 16px rgba(53, 224, 255, 0.7);
+}
+.text-glow-orange {
+  text-shadow: 0 0 16px rgba(255, 138, 42, 0.6);
+}
+
+/* Circuit grid background pattern */
+.bg-circuit-grid {
+  background-image: 
+    radial-gradient(rgba(53, 224, 255, 0.12) 1px, transparent 1px),
+    linear-gradient(to right, rgba(58, 123, 255, 0.04) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(58, 123, 255, 0.04) 1px, transparent 1px);
+  background-size: 36px 36px, 72px 72px, 72px 72px;
+}
+
+/* Glassmorphism */
+.glass-panel {
+  background: rgba(12, 22, 48, 0.75);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  border: 1px solid rgba(120, 170, 255, 0.15);
+}
+
+.glass-dock {
+  background: rgba(8, 16, 36, 0.88);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border: 1px solid rgba(53, 224, 255, 0.28);
+  box-shadow: 0 12px 40px -10px rgba(0, 0, 0, 0.7), 0 0 25px -5px rgba(53, 224, 255, 0.2);
+}
+
+/* Hexagon clip-path */
+.clip-hexagon {
+  clip-path: polygon(50% 0%, 100% 25%, 100% 75%, 50% 100%, 0% 75%, 0% 25%);
+}
+
+@keyframes pulse-subtle {
+  0%, 100% { opacity: 0.9; transform: scale(1); }
+  50% { opacity: 1; transform: scale(1.02); }
+}
+
+.animate-float {
+  animation: float 6s ease-in-out infinite;
+}
+
+@keyframes float {
+  0%, 100% { transform: translateY(0px) rotate(0deg); }
+  50% { transform: translateY(-10px) rotate(1deg); }
+}
+
+/* Smooth QR Laser Scanning Animation */
+@keyframes scanSweep {
+  0% {
+    top: 6%;
+    opacity: 0.85;
+  }
+  50% {
+    top: 90%;
+    opacity: 1;
+  }
+  100% {
+    top: 6%;
+    opacity: 0.85;
+  }
+}
+
+.animate-scan-sweep {
+  animation: scanSweep 2.4s ease-in-out infinite;
+}
+
+/* Print Optimization for Official Entry Pass */
+@media print {
+  body {
+    background: #ffffff !important;
+    color: #050b1a !important;
+    padding: 0 !important;
+    margin: 0 !important;
+  }
+
+  header,
+  footer,
+  aside,
+  nav,
+  button,
+  .no-print,
+  [aria-label="Quick Access Dock"] {
+    display: none !important;
+  }
+
+  #printable-pass,
+  .printable-entry-pass {
+    visibility: visible !important;
+    display: block !important;
+    position: static !important;
+    width: 100% !important;
+    max-width: 700px !important;
+    margin: 20px auto !important;
+    background: #ffffff !important;
+    color: #050b1a !important;
+    border: 2px solid #050b1a !important;
+    box-shadow: none !important;
+    border-radius: 12px !important;
+    page-break-inside: avoid !important;
+  }
+
+  #printable-pass *,
+  .printable-entry-pass * {
+    color: #050b1a !important;
+    border-color: #d1d5db !important;
+    text-shadow: none !important;
+    box-shadow: none !important;
+  }
+
+  #printable-pass canvas,
+  .printable-entry-pass canvas {
+    border: 1px solid #1f2937 !important;
+  }
+}

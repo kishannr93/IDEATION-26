@@ -1,0 +1,6 @@
+{
+  "name": "IDEATION 2026 - 24-Hour Hackathon",
+  "description": "Official portal for IDEATION, a 24-hour national hackathon organized by Anveshan Club at BIET Davangere. Innovate, Build, and Impact with ₹1,00,000 prize pool.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
