@@ -1,7 +1,8 @@
 import React, { useState } from 'react';
 import { useHackathon } from '../context/HackathonContext';
-import { ShieldCheck, UserCheck, Menu, X, ArrowUpRight, Megaphone, QrCode } from 'lucide-react';
+import { ShieldCheck, UserCheck, Menu, X, ArrowUpRight, Megaphone, QrCode, Download } from 'lucide-react';
 import bulbImg from '../assets/images/ideation_logo.jpg';
+import { generatePptTemplate } from '../lib/pptTemplate';
 
 interface NavbarProps {
   onOpenQR: () => void;
@@ -10,6 +11,25 @@ interface NavbarProps {
 export const Navbar: React.FC<NavbarProps> = ({ onOpenQR }) => {
   const { eventConfig, announcements, activeView, setActiveView, setShowRegisterModal, currentTeamSession } = useHackathon();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [isDownloadingTemplate, setIsDownloadingTemplate] = useState(false);
+
+  const handleDownloadTemplate = async () => {
+    try {
+      setIsDownloadingTemplate(true);
+      await generatePptTemplate({
+        teamName: 'Official IDEATION Team',
+        teamId: 'IDN-SAMPLE',
+        track: 'Artificial Intelligence & Smart Systems',
+        college: 'Bapuji Institute of Engineering and Technology (BIET)',
+        problemTitle: 'Standard 10-Slide Project Presentation',
+        problemSummary: 'Official deck template with guidelines, architecture diagrams, tech stack, and impact roadmap.',
+      });
+    } catch (err) {
+      console.error('Error downloading template:', err);
+    } finally {
+      setIsDownloadingTemplate(false);
+    }
+  };
 
   const pinnedAnnouncements = announcements.filter(a => a.pinned);
   const marqueeText = pinnedAnnouncements.length > 0 
@@ -140,10 +160,20 @@ export const Navbar: React.FC<NavbarProps> = ({ onOpenQR }) => {
           <button
             onClick={onOpenQR}
             title="Download Event QR Code for Poster / Share"
-            className="hidden sm:flex items-center gap-1.5 px-3 py-2 text-xs font-medium text-[#9DB0D0] hover:text-[#35E0FF] bg-[#0C1630] hover:bg-[#132247] border border-[#78AAFF]/20 rounded-lg transition-all"
+            className="hidden sm:flex items-center gap-1.5 px-3 py-2 text-xs font-medium text-[#9DB0D0] hover:text-[#35E0FF] bg-[#0C1630] hover:bg-[#132247] border border-[#78AAFF]/20 rounded-lg transition-all cursor-pointer"
           >
             <QrCode className="w-3.5 h-3.5 text-[#35E0FF]" />
             <span className="whitespace-nowrap">Event QR</span>
+          </button>
+
+          <button
+            onClick={handleDownloadTemplate}
+            disabled={isDownloadingTemplate}
+            title="Download standard 10-slide PowerPoint presentation template"
+            className="hidden xl:flex items-center gap-1.5 px-3 py-2 text-xs font-semibold text-[#35E0FF] hover:text-white bg-[#35E0FF]/10 hover:bg-[#35E0FF]/20 border border-[#35E0FF]/30 rounded-lg transition-all cursor-pointer shadow-sm disabled:opacity-50"
+          >
+            <Download className={`w-3.5 h-3.5 ${isDownloadingTemplate ? 'animate-bounce' : ''}`} />
+            <span className="whitespace-nowrap">{isDownloadingTemplate ? 'Generating...' : 'PPT Template'}</span>
           </button>
 
           {currentTeamSession ? (
@@ -229,10 +259,21 @@ export const Navbar: React.FC<NavbarProps> = ({ onOpenQR }) => {
               Venue & Location
             </a>
             <button
+              onClick={() => {
+                setMobileMenuOpen(false);
+                handleDownloadTemplate();
+              }}
+              disabled={isDownloadingTemplate}
+              className="py-2 text-left text-[#35E0FF] font-semibold border-b border-[#78AAFF]/10 flex items-center justify-between"
+            >
+              <span>{isDownloadingTemplate ? 'Generating PPT...' : 'Download PPT Template (.pptx)'}</span>
+              <Download className="w-4 h-4 text-[#35E0FF]" />
+            </button>
+            <button
               onClick={() => { setMobileMenuOpen(false); setActiveView('dashboard'); }}
               className="py-2 text-left text-[#35E0FF] font-semibold border-b border-[#78AAFF]/10"
             >
-              Participant Dashboard / Login
+              Participant Dashboard / PPT Submission
             </button>
             <button
               onClick={() => { setMobileMenuOpen(false); setActiveView('admin'); }}

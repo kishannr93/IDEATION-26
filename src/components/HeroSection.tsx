@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { useHackathon } from '../context/HackathonContext';
-import { Calendar, MapPin, Users, Trophy, IndianRupee, ArrowRight, QrCode, Sparkles, Clock, CheckCircle } from 'lucide-react';
+import { Calendar, MapPin, Users, Trophy, IndianRupee, ArrowRight, QrCode, Sparkles, Clock, CheckCircle, Download } from 'lucide-react';
 import heroBulbImg from '../assets/images/ideation_logo.jpg';
+import { generatePptTemplate } from '../lib/pptTemplate';
 
 interface HeroSectionProps {
   onOpenQR: () => void;
@@ -9,6 +10,7 @@ interface HeroSectionProps {
 
 export const HeroSection: React.FC<HeroSectionProps> = ({ onOpenQR }) => {
   const { eventConfig, setShowRegisterModal, registeredTeams } = useHackathon();
+  const [downloadingPpt, setDownloadingPpt] = useState(false);
 
   // Countdown timer to 18 November 2026
   const [timeLeft, setTimeLeft] = useState({
@@ -17,6 +19,24 @@ export const HeroSection: React.FC<HeroSectionProps> = ({ onOpenQR }) => {
     minutes: 0,
     seconds: 0,
   });
+
+  const handleDownloadTemplate = async () => {
+    try {
+      setDownloadingPpt(true);
+      await generatePptTemplate({
+        teamName: 'Official IDEATION Team',
+        teamId: 'IDN-SAMPLE',
+        track: 'Artificial Intelligence & Smart Systems',
+        college: 'Bapuji Institute of Engineering and Technology (BIET)',
+        problemTitle: 'Standard 10-Slide Project Presentation',
+        problemSummary: 'Official deck template with guidelines, architecture diagrams, tech stack, and impact roadmap.',
+      });
+    } catch (err) {
+      console.error('Error downloading template:', err);
+    } finally {
+      setDownloadingPpt(false);
+    }
+  };
 
   useEffect(() => {
     const targetDate = new Date('2026-11-18T09:00:00+05:30').getTime();
@@ -181,8 +201,18 @@ export const HeroSection: React.FC<HeroSectionProps> = ({ onOpenQR }) => {
             </a>
 
             <button
+              onClick={handleDownloadTemplate}
+              disabled={downloadingPpt}
+              className="px-4 py-3.5 rounded-xl text-xs font-semibold text-[#35E0FF] bg-[#35E0FF]/10 hover:bg-[#35E0FF]/20 border border-[#35E0FF]/40 transition-all flex items-center gap-1.5 cursor-pointer shadow-sm"
+              title="Download standard 10-slide PowerPoint presentation template"
+            >
+              <Download className={`w-4 h-4 ${downloadingPpt ? 'animate-bounce' : ''}`} />
+              <span>{downloadingPpt ? 'Generating...' : 'PPT Template (.pptx)'}</span>
+            </button>
+
+            <button
               onClick={onOpenQR}
-              className="px-4 py-3.5 rounded-xl text-xs font-semibold text-[#9DB0D0] hover:text-[#35E0FF] bg-[#0C1630]/60 hover:bg-[#0C1630] border border-[#78AAFF]/20 rounded-lg transition-all flex items-center gap-1.5"
+              className="px-4 py-3.5 rounded-xl text-xs font-semibold text-[#9DB0D0] hover:text-[#35E0FF] bg-[#0C1630]/60 hover:bg-[#0C1630] border border-[#78AAFF]/20 transition-all flex items-center gap-1.5 cursor-pointer"
             >
               <QrCode className="w-4 h-4 text-[#35E0FF]" />
               <span>Poster QR</span>

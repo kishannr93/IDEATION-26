@@ -52,6 +52,7 @@ export interface RegisteredTeamRecord {
   registeredAt: string;
   checkedIn: boolean;
   checkedInAt?: string;
+  submission?: any;
 }
 
 // Read database from central JSON file
@@ -474,6 +475,106 @@ app.patch('/api/teams/:id/checkin', (req: Request, res: Response) => {
 
   writeDatabase(teams);
   return res.json({ success: true, data: teams[idx] });
+});
+
+// 5.5 SUBMIT PROJECT PRESENTATION (PPT / DECK / DEMO)
+app.put('/api/teams/:id/submission', (req: Request, res: Response) => {
+  const teamId = req.params.id.trim().toUpperCase();
+  const submissionData = req.body;
+
+  const teams = readDatabase();
+  const idx = teams.findIndex(t => t.id.toUpperCase() === teamId);
+  if (idx === -1) {
+    return res.status(404).json({ success: false, error: `Team ${teamId} not found` });
+  }
+
+  const team = teams[idx];
+  const nowIso = new Date().toISOString();
+  const updatedSubmission = {
+    submittedAt: team.submission?.submittedAt || nowIso,
+    updatedAt: nowIso,
+    projectTitle: submissionData.projectTitle || team.ideaTitle || 'Untitled Project',
+    projectTrack: submissionData.projectTrack || team.primaryTrack,
+    problemStatement: submissionData.problemStatement || '',
+    ideaSummary: submissionData.ideaSummary || team.ideaSummary || '',
+    pptFileName: submissionData.pptFileName || team.submission?.pptFileName,
+    pptFileData: submissionData.pptFileData || team.submission?.pptFileData,
+    pptDeckUrl: submissionData.pptDeckUrl || team.submission?.pptDeckUrl,
+    githubUrl: submissionData.githubUrl || team.submission?.githubUrl,
+    demoUrl: submissionData.demoUrl || team.submission?.demoUrl,
+    techStack: submissionData.techStack || team.submission?.techStack || [],
+    evaluationStatus: team.submission?.evaluationStatus || 'Under Review',
+    score: team.submission?.score,
+    feedback: team.submission?.feedback,
+    evaluatedBy: team.submission?.evaluatedBy,
+    evaluatedAt: team.submission?.evaluatedAt,
+  };
+
+  team.submission = updatedSubmission;
+  if (updatedSubmission.projectTitle) {
+    team.ideaTitle = updatedSubmission.projectTitle;
+  }
+  if (updatedSubmission.ideaSummary) {
+    team.ideaSummary = updatedSubmission.ideaSummary;
+  }
+
+  writeDatabase(teams);
+
+  // Notify admin via server email dispatcher
+  const leader = team.members.find(m => m.isLeader) || team.members[0];
+  dispatchEmail(
+    'ktarunkumar1832@gmail.com',
+    `[IDEATION 2026] PPT Submitted - Team ${team.teamName} (${team.id})`,
+    `<div style="font-family:sans-serif;padding:24px;background:#050B1A;color:#fff;border-radius:12px;border:1px solid #35E0FF40;">
+      <h2 style="color:#35E0FF;margin-top:0;">New Project PPT Submission Received</h2>
+      <p><strong>Team:</strong> ${team.teamName} (${team.id})</p>
+      <p><strong>Track:</strong> ${team.primaryTrack}</p>
+      <p><strong>College:</strong> ${team.college}</p>
+      <p><strong>Leader:</strong> ${leader?.name || 'N/A'} (${leader?.email || 'N/A'} / ${leader?.phone || 'N/A'})</p>
+      <p><strong>Project Title:</strong> ${updatedSubmission.projectTitle}</p>
+      <p><strong>PPT Presentation File:</strong> ${updatedSubmission.pptFileName || 'Uploaded directly'}</p>
+      ${updatedSubmission.pptDeckUrl ? `<p><strong>Deck URL:</strong> <a href="${updatedSubmission.pptDeckUrl}" style="color:#35E0FF;">${updatedSubmission.pptDeckUrl}</a></p>` : ''}
+      ${updatedSubmission.githubUrl ? `<p><strong>GitHub:</strong> <a href="${updatedSubmission.githubUrl}" style="color:#35E0FF;">${updatedSubmission.githubUrl}</a></p>` : ''}
+      ${updatedSubmission.demoUrl ? `<p><strong>Live Demo:</strong> <a href="${updatedSubmission.demoUrl}" style="color:#35E0FF;">${updatedSubmission.demoUrl}</a></p>` : ''}
+      <hr style="border:0;border-top:1px solid #78AAFF30;margin:20px 0;" />
+      <p style="color:#9DB0D0;font-size:12px;">This is an automated notification from the IDEATION 2026 Hackathon Portal. Please log in to the Executive Management Suite to evaluate and score this team's presentation.</p>
+    </div>`
+  );
+
+  return res.json({ success: true, data: team });
+});
+
+// 5.6 EVALUATE PROJECT SUBMISSION
+app.patch('/api/teams/:id/evaluation', (req: Request, res: Response) => {
+  const teamId = req.params.id.trim().toUpperCase();
+  const { status, score, feedback, evaluatedBy } = req.body;
+
+  const teams = readDatabase();
+  const idx = teams.findIndex(t => t.id.toUpperCase() === teamId);
+  if (idx === -1) {
+    return res.status(404).json({ success: false, error: `Team ${teamId} not found` });
+  }
+
+  const team = teams[idx];
+  if (!team.submission) {
+    team.submission = {
+      submittedAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      projectTitle: team.ideaTitle || 'Untitled Project',
+      projectTrack: team.primaryTrack,
+      evaluationStatus: status || 'Under Review',
+    };
+  }
+
+  if (status) team.submission.evaluationStatus = status;
+  if (score !== undefined) team.submission.score = score;
+  if (feedback !== undefined) team.submission.feedback = feedback;
+  team.submission.evaluatedBy = evaluatedBy || 'Jury Panel';
+  team.submission.evaluatedAt = new Date().toISOString();
+  team.submission.updatedAt = new Date().toISOString();
+
+  writeDatabase(teams);
+  return res.json({ success: true, data: team });
 });
 
 // 6. EXPORT CLEAN, PROPERLY ALIGNED CSV

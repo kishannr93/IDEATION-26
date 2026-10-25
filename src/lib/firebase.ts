@@ -21,7 +21,7 @@ import {
   Unsubscribe,
 } from 'firebase/firestore';
 import firebaseConfig from '../../firebase-applet-config.json';
-import { RegisteredTeam } from '../types';
+import { RegisteredTeam, ProjectSubmission } from '../types';
 
 // Initialize Firebase App instance
 const app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApp();
@@ -131,6 +131,7 @@ export async function saveTeamToFirestore(team: RegisteredTeam): Promise<void> {
       leaderPhone: leader?.phone || '',
       memberEmails: memberEmails.join(','),
       members: JSON.stringify(team.members),
+      submission: team.submission ? JSON.stringify(team.submission) : null,
     };
 
     const teamRef = doc(db, 'teams', team.id);
@@ -172,6 +173,20 @@ export async function updateTeamCheckInInFirestore(
   }
 }
 
+export async function updateTeamSubmissionInFirestore(
+  teamId: string,
+  submission: ProjectSubmission
+): Promise<void> {
+  try {
+    const teamRef = doc(db, 'teams', teamId);
+    await updateDoc(teamRef, {
+      submission: JSON.stringify(submission),
+    });
+  } catch (err) {
+    console.warn('Firestore submission update warning:', err);
+  }
+}
+
 export async function fetchAllTeamsFromFirestore(): Promise<RegisteredTeam[]> {
   try {
     const colRef = collection(db, 'teams');
@@ -185,6 +200,15 @@ export async function fetchAllTeamsFromFirestore(): Promise<RegisteredTeam[]> {
         parsedMembers = typeof data.members === 'string' ? JSON.parse(data.members) : data.members;
       } catch {
         parsedMembers = [];
+      }
+
+      let parsedSubmission: ProjectSubmission | undefined = undefined;
+      try {
+        if (data.submission) {
+          parsedSubmission = typeof data.submission === 'string' ? JSON.parse(data.submission) : data.submission;
+        }
+      } catch {
+        parsedSubmission = undefined;
       }
 
       teams.push({
@@ -205,6 +229,7 @@ export async function fetchAllTeamsFromFirestore(): Promise<RegisteredTeam[]> {
         checkedIn: Boolean(data.checkedIn),
         checkedInAt: data.checkedInAt,
         members: Array.isArray(parsedMembers) ? parsedMembers : [],
+        submission: parsedSubmission,
       });
     });
 
@@ -232,6 +257,15 @@ export function subscribeFirestoreTeams(
           parsedMembers = [];
         }
 
+        let parsedSubmission: ProjectSubmission | undefined = undefined;
+        try {
+          if (data.submission) {
+            parsedSubmission = typeof data.submission === 'string' ? JSON.parse(data.submission) : data.submission;
+          }
+        } catch {
+          parsedSubmission = undefined;
+        }
+
         teams.push({
           id: data.id || docSnap.id,
           teamName: data.teamName,
@@ -250,6 +284,7 @@ export function subscribeFirestoreTeams(
           checkedIn: Boolean(data.checkedIn),
           checkedInAt: data.checkedInAt,
           members: Array.isArray(parsedMembers) ? parsedMembers : [],
+          submission: parsedSubmission,
         });
       });
       // Sort newest first

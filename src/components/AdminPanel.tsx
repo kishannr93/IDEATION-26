@@ -1,8 +1,9 @@
 import React, { useState } from 'react';
 import { useHackathon } from '../context/HackathonContext';
-import { RegisteredTeam, DomainTrack, Announcement, CoreTeamMember, ScheduleEvent, RuleItem } from '../types';
+import { RegisteredTeam, DomainTrack, Announcement, CoreTeamMember, ScheduleEvent, RuleItem, ProjectSubmission, SubmissionNotification } from '../types';
 import { sendTransactionalEmail, generatePassEmailHtml } from '../lib/email';
 import { AdminQRScanner } from './AdminQRScanner';
+import { generatePptTemplate } from '../lib/pptTemplate';
 import {
   ShieldCheck,
   Users,
@@ -33,6 +34,15 @@ import {
   RotateCcw,
   Save,
   ExternalLink,
+  Award,
+  FileText,
+  UploadCloud,
+  Globe,
+  Github,
+  Sparkles,
+  X,
+  MessageSquare,
+  Check,
 } from 'lucide-react';
 
 export const AdminPanel: React.FC = () => {
@@ -77,6 +87,10 @@ export const AdminPanel: React.FC = () => {
     disconnectGoogleSheets,
     syncGoogleSheets,
     fetchFromGoogleSheets,
+    submissionNotifications,
+    markNotificationAsRead,
+    markAllNotificationsAsRead,
+    evaluateProjectSubmission,
   } = useHackathon();
 
   // Authorized Administrator Accounts
@@ -140,7 +154,23 @@ export const AdminPanel: React.FC = () => {
   const [authError, setAuthError] = useState('');
 
   // Active Tab
-  const [activeTab, setActiveTab] = useState<'overview' | 'teams' | 'payments' | 'news' | 'content' | 'coreteam' | 'checkin' | 'schedule' | 'rules'>('overview');
+  const [activeTab, setActiveTab] = useState<'overview' | 'teams' | 'payments' | 'submissions' | 'news' | 'content' | 'coreteam' | 'checkin' | 'schedule' | 'rules'>('overview');
+
+  // Notifications Dropdown State
+  const [showNotificationDropdown, setShowNotificationDropdown] = useState(false);
+
+  // Project PPT Submissions Tab State
+  const [submissionSearch, setSubmissionSearch] = useState('');
+  const [submissionTrackFilter, setSubmissionTrackFilter] = useState('All');
+  const [submissionStatusFilter, setSubmissionStatusFilter] = useState('All');
+  const [evaluatingTeam, setEvaluatingTeam] = useState<RegisteredTeam | null>(null);
+  const [evalStatus, setEvalStatus] = useState<ProjectSubmission['evaluationStatus']>('Under Review');
+  const [evalScore, setEvalScore] = useState<string>('');
+  const [evalFeedback, setEvalFeedback] = useState<string>('');
+  const [evaluatorName, setEvaluatorName] = useState<string>('');
+  const [isSavingEvaluation, setIsSavingEvaluation] = useState(false);
+  const [evalSaveMessage, setEvalSaveMessage] = useState<{ text: string; success: boolean } | null>(null);
+  const [isDownloadingAdminPpt, setIsDownloadingAdminPpt] = useState(false);
 
   // Table Filters & Search
   const [searchTerm, setSearchTerm] = useState('');
@@ -353,6 +383,33 @@ export const AdminPanel: React.FC = () => {
   const totalRevenue = verifiedTeams * eventConfig.entryFee;
   const totalCheckedIn = registeredTeams.filter(t => t.checkedIn).length;
 
+  // Project PPT Submission Metrics
+  const submittedTeams = registeredTeams.filter(t => Boolean(t.submission));
+  const pendingEvaluations = submittedTeams.filter(t => !t.submission?.evaluationStatus || t.submission.evaluationStatus === 'Under Review').length;
+  const shortlistedSubmissions = submittedTeams.filter(t => t.submission?.evaluationStatus === 'Shortlisted').length;
+  const gradedSubmissions = submittedTeams.filter(t => t.submission?.score !== undefined);
+  const averageJuryScore = gradedSubmissions.length > 0
+    ? Math.round(gradedSubmissions.reduce((acc, t) => acc + (t.submission?.score || 0), 0) / gradedSubmissions.length)
+    : 0;
+  const unreadNotificationsCount = submissionNotifications.filter(n => !n.read).length;
+
+  // Filtered Submissions List
+  const filteredSubmissions = submittedTeams.filter(team => {
+    const sub = team.submission!;
+    const term = submissionSearch.trim().toLowerCase();
+    const matchesSearch =
+      !term ||
+      team.id.toLowerCase().includes(term) ||
+      team.teamName.toLowerCase().includes(term) ||
+      (sub.projectTitle && sub.projectTitle.toLowerCase().includes(term)) ||
+      team.members.some(m => m.name.toLowerCase().includes(term));
+
+    const matchesTrack = submissionTrackFilter === 'All' || (sub.projectTrack || team.primaryTrack) === submissionTrackFilter;
+    const matchesStatus = submissionStatusFilter === 'All' || sub.evaluationStatus === submissionStatusFilter;
+
+    return matchesSearch && matchesTrack && matchesStatus;
+  });
+
   // Filtered Teams List
   const filteredTeams = registeredTeams.filter(team => {
     const matchesSearch =
@@ -443,6 +500,73 @@ export const AdminPanel: React.FC = () => {
     });
   };
 
+  const handleOpenEvaluationModal = (team: RegisteredTeam) => {
+    setEvaluatingTeam(team);
+    const sub = team.submission;
+    setEvalStatus(sub?.evaluationStatus || 'Under Review');
+    setEvalScore(sub?.score !== undefined ? String(sub.score) : '');
+    setEvalFeedback(sub?.feedback || '');
+    setEvaluatorName(sub?.evaluatedBy || currentAdminUser?.name || 'Jury Panel');
+    setEvalSaveMessage(null);
+  };
+
+  const handleSaveEvaluation = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!evaluatingTeam) return;
+
+    setIsSavingEvaluation(true);
+    setEvalSaveMessage(null);
+
+    const scoreNum = evalScore.trim() !== '' ? Math.max(0, Math.min(100, Number(evalScore))) : undefined;
+
+    const res = await evaluateProjectSubmission(evaluatingTeam.id, {
+      status: evalStatus,
+      score: scoreNum,
+      feedback: evalFeedback.trim(),
+      evaluatedBy: evaluatorName.trim() || currentAdminUser?.name || 'Jury Panel',
+    });
+
+    setIsSavingEvaluation(false);
+
+    if (res.success) {
+      setEvalSaveMessage({ text: 'Evaluation and score recorded successfully!', success: true });
+      setTimeout(() => {
+        setEvaluatingTeam(null);
+        setEvalSaveMessage(null);
+      }, 1400);
+    } else {
+      setEvalSaveMessage({ text: res.error || 'Failed to save evaluation', success: false });
+    }
+  };
+
+  const handleAdminDownloadTemplate = async () => {
+    try {
+      setIsDownloadingAdminPpt(true);
+      await generatePptTemplate({
+        teamName: 'Official BIET Template',
+        teamId: 'IDN-SAMPLE',
+        track: 'All Tracks',
+        college: 'Bapuji Institute of Engineering and Technology (BIET)',
+        problemTitle: 'Standard 10-Slide Project Presentation',
+        problemSummary: 'Official deck template with guidelines, architecture diagrams, tech stack, and impact roadmap.',
+      });
+    } catch (err) {
+      console.error('Error generating template:', err);
+    } finally {
+      setIsDownloadingAdminPpt(false);
+    }
+  };
+
+  const handleNotificationClick = (notif: SubmissionNotification) => {
+    markNotificationAsRead(notif.id);
+    const targetTeam = registeredTeams.find(t => t.id === notif.teamId);
+    if (targetTeam) {
+      setActiveTab('submissions');
+      setShowNotificationDropdown(false);
+      handleOpenEvaluationModal(targetTeam);
+    }
+  };
+
   return (
     <div className="min-h-screen py-10 px-4 sm:px-6 lg:px-8 bg-[#050B1A] text-white">
       <div className="max-w-7xl mx-auto">
@@ -470,7 +594,122 @@ export const AdminPanel: React.FC = () => {
             </button>
 
             {isAdminAuthenticated && (
-              <div className="flex items-center gap-3">
+              <div className="flex items-center gap-2.5 sm:gap-3">
+                {/* Download PPT Template Button */}
+                <button
+                  onClick={handleAdminDownloadTemplate}
+                  disabled={isDownloadingAdminPpt}
+                  className="flex items-center gap-1.5 px-3 py-2 text-xs font-semibold text-[#35E0FF] bg-[#35E0FF]/10 hover:bg-[#35E0FF]/20 border border-[#35E0FF]/30 rounded-xl transition-all cursor-pointer"
+                  title="Download standard 10-slide PowerPoint presentation template"
+                >
+                  <Download className={`w-3.5 h-3.5 ${isDownloadingAdminPpt ? 'animate-bounce' : ''}`} />
+                  <span className="hidden md:inline">PPT Template</span>
+                </button>
+
+                {/* Real-time Submissions Notification Bell */}
+                <div className="relative">
+                  <button
+                    onClick={() => setShowNotificationDropdown(!showNotificationDropdown)}
+                    className="relative p-2 text-[#9DB0D0] hover:text-white bg-[#0C1630] border border-[#78AAFF]/20 hover:border-[#35E0FF] rounded-xl transition-colors cursor-pointer"
+                    title="Team Presentation Submission Alerts"
+                  >
+                    <Bell className="w-4 h-4" />
+                    {unreadNotificationsCount > 0 && (
+                      <span className="absolute -top-1.5 -right-1.5 min-w-[18px] h-[18px] px-1 bg-[#FF8A2A] text-white font-mono text-[10px] font-bold rounded-full flex items-center justify-center animate-pulse shadow-md">
+                        {unreadNotificationsCount}
+                      </span>
+                    )}
+                  </button>
+
+                  {/* Notification Dropdown Drawer */}
+                  {showNotificationDropdown && (
+                    <div className="absolute right-0 mt-3 w-80 sm:w-96 rounded-2xl bg-[#081024] border border-[#35E0FF]/40 shadow-[0_10px_40px_rgba(0,0,0,0.8)] z-50 p-4 animate-in fade-in slide-in-from-top-2">
+                      <div className="flex items-center justify-between pb-3 border-b border-[#78AAFF]/20 mb-3">
+                        <div className="flex items-center gap-2">
+                          <Award className="w-4 h-4 text-[#35E0FF]" />
+                          <span className="font-display font-bold text-sm text-white">
+                            Submissions Inbox
+                          </span>
+                          {unreadNotificationsCount > 0 && (
+                            <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-[#FF8A2A]/20 text-[#FF8A2A] font-bold">
+                              {unreadNotificationsCount} New
+                            </span>
+                          )}
+                        </div>
+
+                        {submissionNotifications.length > 0 && (
+                          <button
+                            onClick={markAllNotificationsAsRead}
+                            className="text-[10px] font-mono text-[#35E0FF] hover:underline cursor-pointer"
+                          >
+                            Mark all read
+                          </button>
+                        )}
+                      </div>
+
+                      {submissionNotifications.length === 0 ? (
+                        <div className="py-6 text-center text-[#9DB0D0] text-xs">
+                          <CheckCircle className="w-8 h-8 text-[#78AAFF]/30 mx-auto mb-2" />
+                          <p>No new team presentations submitted yet</p>
+                          <p className="text-[10px] text-[#9DB0D0]/70 mt-1">
+                            Notifications will chime here when teams upload their PPTs.
+                          </p>
+                        </div>
+                      ) : (
+                        <div className="space-y-2 max-h-72 overflow-y-auto pr-1">
+                          {submissionNotifications.slice(0, 15).map((notif) => (
+                            <div
+                              key={notif.id}
+                              className={`p-3 rounded-xl border text-xs transition-colors ${
+                                notif.read
+                                  ? 'bg-[#0C1630]/60 border-[#78AAFF]/15 text-[#9DB0D0]'
+                                  : 'bg-[#0C1630] border-[#35E0FF]/40 text-white shadow-sm'
+                              }`}
+                            >
+                              <div className="flex items-start justify-between gap-2">
+                                <div>
+                                  <div className="font-bold flex items-center gap-1.5">
+                                    {!notif.read && (
+                                      <span className="w-2 h-2 rounded-full bg-[#FF8A2A] shrink-0" />
+                                    )}
+                                    <span className="text-white">{notif.teamName}</span>
+                                    <span className="text-[10px] font-mono text-[#35E0FF]">({notif.teamId})</span>
+                                  </div>
+                                  <div className="text-[11px] text-[#9DB0D0] mt-0.5 line-clamp-1">
+                                    {notif.projectTitle || 'Project PPT Presentation'}
+                                  </div>
+                                  <div className="text-[10px] text-[#78AAFF] mt-1 font-mono">
+                                    Lead: {notif.leaderName} · {new Date(notif.submittedAt).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })}
+                                  </div>
+                                </div>
+
+                                <button
+                                  onClick={() => handleNotificationClick(notif)}
+                                  className="px-2.5 py-1 rounded-lg bg-[#35E0FF]/15 hover:bg-[#35E0FF]/25 text-[#35E0FF] text-[11px] font-bold shrink-0 transition-colors cursor-pointer"
+                                >
+                                  View
+                                </button>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+
+                      <div className="pt-3 mt-3 border-t border-[#78AAFF]/20 text-center">
+                        <button
+                          onClick={() => {
+                            setActiveTab('submissions');
+                            setShowNotificationDropdown(false);
+                          }}
+                          className="text-xs text-[#35E0FF] hover:underline font-mono font-bold cursor-pointer"
+                        >
+                          View All Project Submissions ({submittedTeams.length}) →
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+
                 <div className="hidden sm:flex flex-col text-right">
                   <span className="text-xs font-semibold text-white">
                     {currentAdminUser?.name || 'Authorized Admin'}
@@ -481,7 +720,7 @@ export const AdminPanel: React.FC = () => {
                 </div>
                 <button
                   onClick={handleAdminLogout}
-                  className="flex items-center gap-1.5 px-3 py-2 text-xs font-mono text-rose-400 hover:text-white bg-rose-500/10 border border-rose-500/30 rounded-xl transition-colors"
+                  className="flex items-center gap-1.5 px-3 py-2 text-xs font-mono text-rose-400 hover:text-white bg-rose-500/10 border border-rose-500/30 rounded-xl transition-colors cursor-pointer"
                 >
                   <LogOut className="w-3.5 h-3.5" />
                   <span>Sign Out</span>
@@ -590,6 +829,23 @@ export const AdminPanel: React.FC = () => {
               >
                 <CreditCard className="w-4 h-4" />
                 <span>Payment Verification ({pendingTeams} Pending)</span>
+              </button>
+
+              <button
+                onClick={() => setActiveTab('submissions')}
+                className={`px-4 py-2 text-xs font-semibold rounded-xl whitespace-nowrap transition-colors flex items-center gap-1.5 ${
+                  activeTab === 'submissions'
+                    ? 'bg-[#35E0FF]/20 text-[#35E0FF] border border-[#35E0FF]/40'
+                    : 'text-[#9DB0D0] hover:text-white'
+                }`}
+              >
+                <Award className="w-4 h-4 text-[#FF4FD8]" />
+                <span>PPT Submissions ({submittedTeams.length})</span>
+                {unreadNotificationsCount > 0 && (
+                  <span className="min-w-[18px] h-[18px] px-1 bg-[#FF8A2A] text-white text-[10px] font-mono font-bold rounded-full flex items-center justify-center animate-pulse">
+                    {unreadNotificationsCount}
+                  </span>
+                )}
               </button>
 
               <button
@@ -1169,6 +1425,310 @@ export const AdminPanel: React.FC = () => {
                         </div>
                       </div>
                     ))}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* TAB 3.5: PROJECT PPT SUBMISSIONS & JURY EVALUATION */}
+            {activeTab === 'submissions' && (
+              <div className="space-y-6 animate-in fade-in duration-200">
+                {/* Header Summary & Actions */}
+                <div className="p-6 rounded-3xl bg-[#081024] border border-[#35E0FF]/30 flex flex-col md:flex-row items-start md:items-center justify-between gap-4 shadow-xl">
+                  <div>
+                    <div className="flex items-center gap-2 mb-1">
+                      <span className="font-mono text-xs px-2.5 py-0.5 rounded bg-[#FF4FD8]/20 text-[#FF4FD8] border border-[#FF4FD8]/30 font-bold">
+                        Jury Evaluation Portal
+                      </span>
+                      <span className="text-xs text-[#9DB0D0]">BIET Davangere · IDEATION 2026</span>
+                    </div>
+                    <h3 className="text-xl sm:text-2xl font-bold font-display text-white">
+                      Project Presentations & Pitch Decks
+                    </h3>
+                    <p className="text-xs text-[#9DB0D0] mt-0.5">
+                      Review uploaded PPT presentation files, external deck links, evaluate technical viability, and assign jury scores.
+                    </p>
+                  </div>
+
+                  <div className="flex flex-wrap items-center gap-2">
+                    <button
+                      onClick={handleAdminDownloadTemplate}
+                      disabled={isDownloadingAdminPpt}
+                      className="px-3.5 py-2 rounded-xl text-xs font-bold text-[#35E0FF] bg-[#35E0FF]/10 hover:bg-[#35E0FF]/20 border border-[#35E0FF]/30 flex items-center gap-1.5 transition-all cursor-pointer shadow-sm"
+                    >
+                      <Download className="w-4 h-4" />
+                      <span>Download PPT Template (.pptx)</span>
+                    </button>
+
+                    {unreadNotificationsCount > 0 && (
+                      <button
+                        onClick={markAllNotificationsAsRead}
+                        className="px-3.5 py-2 rounded-xl text-xs font-mono text-[#9DB0D0] hover:text-white bg-[#0C1630] border border-[#78AAFF]/20 transition-all cursor-pointer"
+                      >
+                        Clear Notification Badges ({unreadNotificationsCount})
+                      </button>
+                    )}
+                  </div>
+                </div>
+
+                {/* Submissions KPI Counters */}
+                <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+                  <div className="p-5 rounded-2xl bg-[#0C1630] border border-[#78AAFF]/20">
+                    <span className="text-xs font-tech text-[#9DB0D0] uppercase font-semibold">Submissions Received</span>
+                    <div className="text-3xl font-mono font-bold text-white mt-1.5 tabular-nums">
+                      {submittedTeams.length} <span className="text-xs font-normal text-[#9DB0D0]">/ {registeredTeams.length} teams</span>
+                    </div>
+                  </div>
+
+                  <div className="p-5 rounded-2xl bg-[#0C1630] border border-amber-500/30">
+                    <span className="text-xs font-tech text-amber-300 uppercase font-semibold">Awaiting Jury Review</span>
+                    <div className="text-3xl font-mono font-bold text-amber-300 mt-1.5 tabular-nums">
+                      {pendingEvaluations}
+                    </div>
+                  </div>
+
+                  <div className="p-5 rounded-2xl bg-[#0C1630] border border-purple-500/30">
+                    <span className="text-xs font-tech text-purple-300 uppercase font-semibold">Shortlisted for Finals</span>
+                    <div className="text-3xl font-mono font-bold text-purple-300 mt-1.5 tabular-nums">
+                      {shortlistedSubmissions}
+                    </div>
+                  </div>
+
+                  <div className="p-5 rounded-2xl bg-[#0C1630] border border-emerald-500/30">
+                    <span className="text-xs font-tech text-emerald-400 uppercase font-semibold">Average Jury Score</span>
+                    <div className="text-3xl font-mono font-bold text-emerald-300 mt-1.5 tabular-nums">
+                      {averageJuryScore > 0 ? `${averageJuryScore}/100` : 'Pending'}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Filters and Search Bar */}
+                <div className="p-4 rounded-2xl bg-[#0C1630] border border-[#78AAFF]/20 flex flex-col md:flex-row items-center justify-between gap-3 text-xs">
+                  <div className="relative w-full md:w-80">
+                    <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-[#9DB0D0]" />
+                    <input
+                      type="text"
+                      placeholder="Search submissions by team, title, or lead..."
+                      value={submissionSearch}
+                      onChange={(e) => setSubmissionSearch(e.target.value)}
+                      className="w-full pl-9 pr-3.5 py-2 bg-[#081024] border border-[#78AAFF]/20 rounded-xl text-white placeholder-[#9DB0D0]/60 focus:outline-none focus:border-[#35E0FF]"
+                    />
+                  </div>
+
+                  <div className="flex flex-wrap items-center gap-2 w-full md:w-auto">
+                    <select
+                      value={submissionTrackFilter}
+                      onChange={(e) => setSubmissionTrackFilter(e.target.value)}
+                      className="px-3 py-2 bg-[#081024] border border-[#78AAFF]/20 rounded-xl text-white focus:outline-none focus:border-[#35E0FF]"
+                    >
+                      <option value="All">All Tracks</option>
+                      {tracks.map(t => (
+                        <option key={t.id} value={t.title}>{t.title}</option>
+                      ))}
+                    </select>
+
+                    <select
+                      value={submissionStatusFilter}
+                      onChange={(e) => setSubmissionStatusFilter(e.target.value)}
+                      className="px-3 py-2 bg-[#081024] border border-[#78AAFF]/20 rounded-xl text-white focus:outline-none focus:border-[#35E0FF]"
+                    >
+                      <option value="All">All Evaluation Statuses</option>
+                      <option value="Under Review">Under Review</option>
+                      <option value="Shortlisted">Shortlisted</option>
+                      <option value="Evaluated">Evaluated</option>
+                      <option value="Needs Revision">Needs Revision</option>
+                    </select>
+                  </div>
+                </div>
+
+                {/* Submissions List */}
+                {filteredSubmissions.length === 0 ? (
+                  <div className="p-12 rounded-2xl bg-[#0C1630] border border-[#78AAFF]/20 text-center">
+                    <Award className="w-10 h-10 text-[#78AAFF]/40 mx-auto mb-3" />
+                    <h4 className="text-base font-bold text-white">No project submissions match your criteria</h4>
+                    <p className="text-xs text-[#9DB0D0] mt-1 max-w-md mx-auto">
+                      {submittedTeams.length === 0
+                        ? 'Participants can submit their PowerPoint decks from their Participant Dashboard. Once submitted, they will appear here.'
+                        : 'Try adjusting your search terms or track filters above.'}
+                    </p>
+                  </div>
+                ) : (
+                  <div className="space-y-4">
+                    {filteredSubmissions.map((team) => {
+                      const sub = team.submission!;
+                      const leader = team.members.find(m => m.isLeader) || team.members[0];
+                      return (
+                        <div
+                          key={team.id}
+                          className="p-5 sm:p-6 rounded-2xl bg-[#0C1630] border border-[#78AAFF]/20 hover:border-[#35E0FF]/40 transition-all space-y-4 shadow-sm"
+                        >
+                          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-[#78AAFF]/15">
+                            <div>
+                              <div className="flex items-center gap-2">
+                                <span className="font-mono text-xs font-bold text-[#35E0FF] bg-[#35E0FF]/15 px-2 py-0.5 rounded border border-[#35E0FF]/30">
+                                  {team.id}
+                                </span>
+                                <h4 className="font-display font-bold text-white text-base">
+                                  {team.teamName}
+                                </h4>
+                                <span className="text-xs text-[#9DB0D0]">· {team.college}</span>
+                              </div>
+                              <div className="text-xs text-[#9DB0D0] mt-1">
+                                <span className="text-[#35E0FF] font-semibold">{sub.projectTrack || team.primaryTrack}</span>
+                                {' · '}
+                                <span>Leader: <span className="text-white">{leader?.name}</span> ({leader?.phone} · {leader?.email})</span>
+                              </div>
+                            </div>
+
+                            <div className="flex items-center gap-2">
+                              <span
+                                className={`px-2.5 py-1 rounded-lg text-xs font-mono font-bold border ${
+                                  sub.evaluationStatus === 'Shortlisted'
+                                    ? 'bg-purple-500/20 text-purple-300 border-purple-400'
+                                    : sub.evaluationStatus === 'Evaluated'
+                                    ? 'bg-emerald-500/20 text-emerald-300 border-emerald-400'
+                                    : sub.evaluationStatus === 'Needs Revision'
+                                    ? 'bg-rose-500/20 text-rose-300 border-rose-400'
+                                    : 'bg-amber-500/20 text-amber-300 border-amber-400'
+                                }`}
+                              >
+                                ● {sub.evaluationStatus}
+                              </span>
+
+                              {sub.score !== undefined && (
+                                <span className="px-2.5 py-1 rounded-lg text-xs font-mono font-bold bg-[#35E0FF]/20 text-[#35E0FF] border border-[#35E0FF]/40">
+                                  {sub.score} / 100
+                                </span>
+                              )}
+                            </div>
+                          </div>
+
+                          {/* Submission Details */}
+                          <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 text-xs">
+                            <div className="lg:col-span-8 space-y-2">
+                              <div>
+                                <span className="text-[10px] font-mono uppercase text-[#9DB0D0]">Project Title</span>
+                                <div className="text-sm font-bold text-white">
+                                  {sub.projectTitle || team.ideaTitle || 'Untitled Presentation'}
+                                </div>
+                              </div>
+
+                              {sub.problemStatement && (
+                                <div>
+                                  <span className="text-[10px] font-mono uppercase text-[#9DB0D0]">Problem Addressed</span>
+                                  <p className="text-white/80 line-clamp-2 leading-relaxed">
+                                    {sub.problemStatement}
+                                  </p>
+                                </div>
+                              )}
+
+                              {sub.ideaSummary && (
+                                <div>
+                                  <span className="text-[10px] font-mono uppercase text-[#9DB0D0]">Architecture & Solution</span>
+                                  <p className="text-[#9DB0D0] line-clamp-2 leading-relaxed">
+                                    {sub.ideaSummary}
+                                  </p>
+                                </div>
+                              )}
+
+                              {sub.techStack && sub.techStack.length > 0 && (
+                                <div className="flex flex-wrap gap-1.5 pt-1">
+                                  {sub.techStack.map((tech, idx) => (
+                                    <span
+                                      key={idx}
+                                      className="px-2 py-0.5 rounded bg-[#081024] text-[#35E0FF] border border-[#78AAFF]/20 text-[10px] font-mono"
+                                    >
+                                      {tech}
+                                    </span>
+                                  ))}
+                                </div>
+                              )}
+                            </div>
+
+                            {/* Presentation Links & Jury Actions */}
+                            <div className="lg:col-span-4 flex flex-col justify-between space-y-3 p-4 rounded-xl bg-[#081024] border border-[#78AAFF]/15">
+                              <div className="space-y-2">
+                                <span className="text-[10px] font-mono uppercase text-[#9DB0D0] block">
+                                  Presentation Assets
+                                </span>
+
+                                <div className="space-y-1.5">
+                                  {sub.pptFileData ? (
+                                    <a
+                                      href={sub.pptFileData}
+                                      download={sub.pptFileName || `${team.id}_Presentation.pptx`}
+                                      className="w-full py-1.5 px-3 rounded-lg bg-[#35E0FF]/15 hover:bg-[#35E0FF]/25 text-[#35E0FF] text-xs font-semibold flex items-center justify-between transition-colors"
+                                    >
+                                      <span className="truncate flex items-center gap-1.5">
+                                        <FileText className="w-3.5 h-3.5 shrink-0" />
+                                        <span className="truncate">{sub.pptFileName || 'Download PPT'}</span>
+                                      </span>
+                                      <Download className="w-3.5 h-3.5 shrink-0 ml-1" />
+                                    </a>
+                                  ) : null}
+
+                                  {sub.pptDeckUrl ? (
+                                    <a
+                                      href={sub.pptDeckUrl}
+                                      target="_blank"
+                                      rel="noopener noreferrer"
+                                      className="w-full py-1.5 px-3 rounded-lg bg-[#132247] hover:bg-[#1a2d5c] text-white text-xs font-semibold flex items-center justify-between border border-[#78AAFF]/20 transition-colors"
+                                    >
+                                      <span className="truncate flex items-center gap-1.5">
+                                        <Globe className="w-3.5 h-3.5 shrink-0 text-[#35E0FF]" />
+                                        <span>Open External Deck</span>
+                                      </span>
+                                      <ExternalLink className="w-3.5 h-3.5 shrink-0 ml-1 text-[#35E0FF]" />
+                                    </a>
+                                  ) : null}
+
+                                  <div className="flex items-center gap-2 pt-1">
+                                    {sub.githubUrl && (
+                                      <a
+                                        href={sub.githubUrl}
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                        className="flex-1 py-1 px-2 rounded-lg bg-[#0C1630] hover:bg-[#132247] text-white text-[11px] font-mono flex items-center justify-center gap-1 border border-[#78AAFF]/20"
+                                      >
+                                        <Github className="w-3 h-3" />
+                                        <span>GitHub</span>
+                                      </a>
+                                    )}
+                                    {sub.demoUrl && (
+                                      <a
+                                        href={sub.demoUrl}
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                        className="flex-1 py-1 px-2 rounded-lg bg-[#0C1630] hover:bg-[#132247] text-white text-[11px] font-mono flex items-center justify-center gap-1 border border-[#78AAFF]/20"
+                                      >
+                                        <ExternalLink className="w-3 h-3 text-[#35E0FF]" />
+                                        <span>Demo</span>
+                                      </a>
+                                    )}
+                                  </div>
+                                </div>
+                              </div>
+
+                              <button
+                                onClick={() => handleOpenEvaluationModal(team)}
+                                className="w-full py-2.5 rounded-xl font-bold text-xs text-white bg-gradient-to-r from-[#FF8A2A] to-[#F5611A] shadow-[0_0_15px_rgba(255,138,42,0.3)] hover:brightness-110 active:scale-95 transition-all flex items-center justify-center gap-1.5 cursor-pointer"
+                              >
+                                <Award className="w-4 h-4" />
+                                <span>{sub.score !== undefined ? 'Update Evaluation & Score' : 'Evaluate & Grade PPT'}</span>
+                              </button>
+                            </div>
+                          </div>
+
+                          {/* Feedback Banner if exists */}
+                          {sub.feedback && (
+                            <div className="p-3 rounded-xl bg-purple-500/10 border border-purple-500/30 text-xs text-purple-200">
+                              <span className="font-bold text-white mr-1.5">Jury Feedback ({sub.evaluatedBy || 'Jury Panel'}):</span>
+                              <span>{sub.feedback}</span>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
                   </div>
                 )}
               </div>
@@ -2097,13 +2657,224 @@ export const AdminPanel: React.FC = () => {
                   <span className="text-[11px] text-[#9DB0D0]">Official IDEATION 2026 Check-in Verification</span>
                   <button
                     onClick={() => window.print()}
-                    className="px-4 py-2 rounded-xl text-xs font-semibold text-white bg-[#132247] hover:bg-[#1a2d5c] border border-[#35E0FF]/30 flex items-center gap-2 transition-colors"
+                    className="px-4 py-2 rounded-xl text-xs font-semibold text-white bg-[#132247] hover:bg-[#1a2d5c] border border-[#35E0FF]/30 flex items-center gap-2 transition-colors cursor-pointer"
                   >
                     <Printer className="w-4 h-4 text-[#35E0FF]" />
                     <span>Print Entry Pass</span>
                   </button>
                 </div>
               </div>
+            </div>
+          </div>
+        )}
+
+        {/* EVALUATE PROJECT PRESENTATION MODAL */}
+        {evaluatingTeam && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md overflow-y-auto">
+            <div className="w-full max-w-xl bg-[#081024] border border-[#FF4FD8]/40 rounded-3xl p-6 sm:p-8 shadow-[0_0_60px_rgba(255,79,216,0.25)] relative my-8 animate-in fade-in zoom-in-95">
+              <button
+                onClick={() => {
+                  setEvaluatingTeam(null);
+                  setEvalSaveMessage(null);
+                }}
+                className="absolute top-5 right-5 text-[#9DB0D0] hover:text-white p-1 rounded-lg bg-[#0C1630] border border-[#78AAFF]/20 cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+
+              <div className="flex items-center gap-3 mb-2">
+                <div className="w-10 h-10 rounded-xl bg-[#FF4FD8]/15 border border-[#FF4FD8]/40 text-[#FF4FD8] flex items-center justify-center">
+                  <Award className="w-5 h-5" />
+                </div>
+                <div>
+                  <span className="text-[10px] font-mono text-[#35E0FF] font-bold uppercase tracking-wider">
+                    Jury Evaluation & Grading · {evaluatingTeam.id}
+                  </span>
+                  <h3 className="text-xl font-bold font-display text-white">
+                    {evaluatingTeam.teamName}
+                  </h3>
+                </div>
+              </div>
+
+              <div className="text-xs text-[#9DB0D0] mb-5">
+                {evaluatingTeam.college} · <span className="text-[#35E0FF] font-semibold">{evaluatingTeam.primaryTrack}</span>
+              </div>
+
+              {/* Quick links to review assets */}
+              <div className="p-3.5 rounded-xl bg-[#0C1630] border border-[#78AAFF]/20 mb-5 space-y-2 text-xs">
+                <div className="font-bold text-white line-clamp-1">
+                  Title: {evaluatingTeam.submission?.projectTitle || evaluatingTeam.ideaTitle || 'Untitled Presentation'}
+                </div>
+                <div className="flex flex-wrap items-center gap-2 pt-1">
+                  {evaluatingTeam.submission?.pptFileData && (
+                    <a
+                      href={evaluatingTeam.submission.pptFileData}
+                      download={evaluatingTeam.submission.pptFileName || `${evaluatingTeam.id}_Presentation.pptx`}
+                      className="px-2.5 py-1 rounded-lg bg-[#35E0FF]/15 text-[#35E0FF] border border-[#35E0FF]/30 font-semibold flex items-center gap-1 cursor-pointer"
+                    >
+                      <Download className="w-3.5 h-3.5" />
+                      <span>Download Deck ({evaluatingTeam.submission.pptFileName})</span>
+                    </a>
+                  )}
+                  {evaluatingTeam.submission?.pptDeckUrl && (
+                    <a
+                      href={evaluatingTeam.submission.pptDeckUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="px-2.5 py-1 rounded-lg bg-[#132247] text-white border border-[#78AAFF]/30 font-semibold flex items-center gap-1"
+                    >
+                      <ExternalLink className="w-3.5 h-3.5 text-[#35E0FF]" />
+                      <span>Open External Deck</span>
+                    </a>
+                  )}
+                  {evaluatingTeam.submission?.githubUrl && (
+                    <a
+                      href={evaluatingTeam.submission.githubUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="px-2.5 py-1 rounded-lg bg-[#081024] text-white border border-[#78AAFF]/30 font-mono text-[11px] flex items-center gap-1"
+                    >
+                      <Github className="w-3.5 h-3.5" />
+                      <span>GitHub</span>
+                    </a>
+                  )}
+                  {evaluatingTeam.submission?.demoUrl && (
+                    <a
+                      href={evaluatingTeam.submission.demoUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="px-2.5 py-1 rounded-lg bg-[#081024] text-white border border-[#78AAFF]/30 font-mono text-[11px] flex items-center gap-1"
+                    >
+                      <Globe className="w-3.5 h-3.5 text-[#35E0FF]" />
+                      <span>Live Demo</span>
+                    </a>
+                  )}
+                </div>
+              </div>
+
+              {evalSaveMessage && (
+                <div
+                  className={`mb-4 p-3 rounded-xl text-xs flex items-center gap-2 ${
+                    evalSaveMessage.success
+                      ? 'bg-emerald-500/15 border border-emerald-400 text-emerald-300'
+                      : 'bg-rose-500/15 border border-rose-400 text-rose-300'
+                  }`}
+                >
+                  {evalSaveMessage.success ? (
+                    <CheckCircle className="w-4 h-4 text-emerald-400" />
+                  ) : (
+                    <XCircle className="w-4 h-4 text-rose-400" />
+                  )}
+                  <span>{evalSaveMessage.text}</span>
+                </div>
+              )}
+
+              <form onSubmit={handleSaveEvaluation} className="space-y-4 text-xs">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-[#9DB0D0] mb-1 font-semibold">
+                      Evaluation Status *
+                    </label>
+                    <select
+                      value={evalStatus}
+                      onChange={(e) => setEvalStatus(e.target.value as any)}
+                      className="w-full px-3 py-2 bg-[#0C1630] border border-[#78AAFF]/20 rounded-xl text-white focus:outline-none focus:border-[#FF4FD8]"
+                    >
+                      <option value="Under Review">Under Review</option>
+                      <option value="Shortlisted">Shortlisted for Finals</option>
+                      <option value="Evaluated">Evaluated / Graded</option>
+                      <option value="Needs Revision">Needs Revision</option>
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block text-[#9DB0D0] mb-1 font-semibold">
+                      Jury Score (0 - 100)
+                    </label>
+                    <input
+                      type="number"
+                      min={0}
+                      max={100}
+                      placeholder="e.g. 88"
+                      value={evalScore}
+                      onChange={(e) => setEvalScore(e.target.value)}
+                      className="w-full px-3 py-2 bg-[#0C1630] border border-[#78AAFF]/20 rounded-xl text-white font-mono focus:outline-none focus:border-[#FF4FD8]"
+                    />
+                  </div>
+                </div>
+
+                {/* Score presets */}
+                <div className="flex items-center gap-1.5 pt-0.5">
+                  <span className="text-[10px] text-[#9DB0D0]">Score Presets:</span>
+                  {[70, 75, 80, 85, 90, 95].map((preset) => (
+                    <button
+                      key={preset}
+                      type="button"
+                      onClick={() => setEvalScore(String(preset))}
+                      className="px-2 py-0.5 rounded bg-[#0C1630] text-[#35E0FF] hover:bg-[#35E0FF]/20 border border-[#78AAFF]/20 font-mono text-[10px] cursor-pointer"
+                    >
+                      {preset}
+                    </button>
+                  ))}
+                </div>
+
+                <div>
+                  <label className="block text-[#9DB0D0] mb-1 font-semibold">
+                    Evaluator / Jury Member Name
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="e.g. Dr. Ramesh K / Prof. Anveshan"
+                    value={evaluatorName}
+                    onChange={(e) => setEvaluatorName(e.target.value)}
+                    className="w-full px-3 py-2 bg-[#0C1630] border border-[#78AAFF]/20 rounded-xl text-white focus:outline-none focus:border-[#FF4FD8]"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-[#9DB0D0] mb-1 font-semibold">
+                    Jury Feedback & Critique (Visible to Team)
+                  </label>
+                  <textarea
+                    rows={3}
+                    placeholder="Notes on feasibility, architecture originality, hardware implementation, and presentation pitch..."
+                    value={evalFeedback}
+                    onChange={(e) => setEvalFeedback(e.target.value)}
+                    className="w-full px-3 py-2 bg-[#0C1630] border border-[#78AAFF]/20 rounded-xl text-white focus:outline-none focus:border-[#FF4FD8]"
+                  />
+                </div>
+
+                <div className="pt-4 border-t border-[#78AAFF]/20 flex items-center justify-end gap-2.5">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setEvaluatingTeam(null);
+                      setEvalSaveMessage(null);
+                    }}
+                    className="px-4 py-2 rounded-xl font-semibold text-[#9DB0D0] hover:text-white bg-[#0C1630] border border-[#78AAFF]/20 cursor-pointer"
+                  >
+                    Cancel
+                  </button>
+
+                  <button
+                    type="submit"
+                    disabled={isSavingEvaluation}
+                    className="px-5 py-2 rounded-xl font-bold text-white bg-gradient-to-r from-[#FF8A2A] to-[#F5611A] shadow-[0_0_20px_rgba(255,138,42,0.4)] hover:brightness-110 active:scale-95 transition-all flex items-center gap-1.5 disabled:opacity-50 cursor-pointer"
+                  >
+                    {isSavingEvaluation ? (
+                      <>
+                        <Clock className="w-4 h-4 animate-spin" />
+                        <span>Saving...</span>
+                      </>
+                    ) : (
+                      <>
+                        <Save className="w-4 h-4" />
+                        <span>Save Evaluation</span>
+                      </>
+                    )}
+                  </button>
+                </div>
+              </form>
             </div>
           </div>
         )}

@@ -181,3 +181,82 @@ export const generateApprovalEmailHtml = (params: {
 </html>
   `.trim();
 };
+
+export const generateSubmissionNotificationEmailHtml = (params: {
+  teamId: string;
+  teamName: string;
+  college?: string;
+  leaderName: string;
+  leaderEmail: string;
+  leaderPhone?: string;
+  projectTitle: string;
+  projectTrack: string;
+  pptFileName?: string;
+  pptDeckUrl?: string;
+  githubUrl?: string;
+  demoUrl?: string;
+  techStack?: string[];
+  submittedAt: string;
+}): string => {
+  return `
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>New Project PPT Submission Alert</title>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #050B1A; color: #F2F6FF; margin: 0; padding: 20px; }
+    .card { max-width: 600px; margin: 0 auto; background: #0C1630; border: 1px solid #35E0FF40; border-radius: 16px; padding: 32px; box-shadow: 0 10px 40px rgba(0,0,0,0.5); }
+    .header { text-align: center; border-bottom: 1px solid #78AAFF20; padding-bottom: 20px; }
+    .title { font-size: 24px; font-weight: 800; color: #FFFFFF; letter-spacing: 1px; }
+    .badge { display: inline-block; padding: 4px 12px; background: rgba(53, 224, 255, 0.15); border: 1px solid #35E0FF; border-radius: 9999px; font-size: 11px; font-weight: 700; color: #35E0FF; text-transform: uppercase; }
+    .details { margin: 24px 0; line-height: 1.6; font-size: 14px; color: #CBD5E1; }
+    .field { display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid #78AAFF15; }
+    .field-label { color: #94A3B8; }
+    .field-value { color: #FFFFFF; font-weight: 600; text-align: right; }
+    .alert-box { background: rgba(53, 224, 255, 0.08); border-left: 4px solid #35E0FF; padding: 12px 16px; margin: 20px 0; border-radius: 0 8px 8px 0; font-size: 13px; color: #E0F2FE; }
+    .footer { text-align: center; font-size: 12px; color: #64748B; margin-top: 24px; }
+    .btn { display: inline-block; background: #35E0FF; color: #050B1A; font-weight: 700; text-decoration: none; padding: 10px 20px; border-radius: 8px; margin-top: 10px; font-size: 13px; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="header">
+      <div class="title">IDEATION 2026</div>
+      <div style="font-size: 13px; color: #94A3B8;">Anveshan Admin Notification</div>
+      <div style="margin-top: 12px;">
+        <span class="badge">NEW PROJECT PPT SUBMITTED</span>
+      </div>
+    </div>
+    <div class="details">
+      <div class="alert-box">
+        <strong>⚡ Action Required:</strong> Team <strong>${params.teamName} (${params.teamId})</strong> has just uploaded their project pitch deck for judging evaluation.
+      </div>
+      
+      <div style="background: #081024; border-radius: 12px; padding: 16px; margin: 16px 0;">
+        <div class="field"><span class="field-label">Team ID:</span><span class="field-value" style="color: #35E0FF;">${params.teamId}</span></div>
+        <div class="field"><span class="field-label">Team Name:</span><span class="field-value">${params.teamName}</span></div>
+        <div class="field"><span class="field-label">Project Title:</span><span class="field-value">${params.projectTitle}</span></div>
+        <div class="field"><span class="field-label">Track:</span><span class="field-value">${params.projectTrack}</span></div>
+        <div class="field"><span class="field-label">Institution:</span><span class="field-value">${params.college}</span></div>
+        <div class="field"><span class="field-label">Leader:</span><span class="field-value">${params.leaderName} (${params.leaderEmail})</span></div>
+        <div class="field"><span class="field-label">Submitted At:</span><span class="field-value">${new Date(params.submittedAt).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' })} IST</span></div>
+        ${params.pptFileName ? `<div class="field"><span class="field-label">PPT File:</span><span class="field-value">${params.pptFileName}</span></div>` : ''}
+        ${params.pptDeckUrl ? `<div class="field"><span class="field-label">Deck URL:</span><span class="field-value"><a href="${params.pptDeckUrl}" style="color: #35E0FF;" target="_blank">Open Online Presentation</a></span></div>` : ''}
+        ${params.githubUrl ? `<div class="field"><span class="field-label">GitHub Repo:</span><span class="field-value"><a href="${params.githubUrl}" style="color: #35E0FF;" target="_blank">${params.githubUrl}</a></span></div>` : ''}
+      </div>
+
+      <p style="text-align: center; margin-top: 20px;">
+        <a href="https://ais-pre-usrmtxil4qh7m75g2atyqu-949332054040.asia-southeast1.run.app/?view=admin" class="btn" target="_blank">
+          Open Admin Panel to Review & Score Submission
+        </a>
+      </p>
+    </div>
+    <div class="footer">
+      <p>IDEATION 2026 Admin Alert System · Bapuji Institute of Engineering and Technology</p>
+    </div>
+  </div>
+</body>
+</html>
+  `.trim();
+};

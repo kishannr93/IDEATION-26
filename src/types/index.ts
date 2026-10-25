@@ -9,6 +9,42 @@ export interface TeamMember {
   isLeader?: boolean;
 }
 
+export interface ProjectSubmission {
+  submitted?: boolean;
+  submittedAt: string;
+  updatedAt?: string;
+  projectTitle: string;
+  projectTrack: string;
+  problemStatement?: string;
+  ideaSummary?: string;
+  pptFileName?: string;
+  pptFileData?: string; // base64 or storage url
+  pptDeckUrl?: string; // presentation link (Google Slides / Canva / OneDrive / Drive)
+  githubUrl?: string;
+  demoUrl?: string;
+  techStack?: string[];
+  evaluationStatus: 'Pending Review' | 'Reviewed' | 'Shortlisted' | 'Needs Revision' | 'Under Review' | 'Evaluated';
+  score?: number; // 0 to 100
+  feedback?: string;
+  evaluatedBy?: string;
+  evaluatedAt?: string;
+}
+
+export interface SubmissionNotification {
+  id: string;
+  teamId: string;
+  teamName: string;
+  leaderName: string;
+  leaderEmail: string;
+  leaderPhone?: string;
+  projectTitle: string;
+  projectTrack?: string;
+  pptDeckUrl?: string;
+  pptFileName?: string;
+  submittedAt: string;
+  read: boolean;
+}
+
 export interface RegisteredTeam {
   id: string; // e.g. IDN-0104
   teamName: string;
@@ -21,6 +57,8 @@ export interface RegisteredTeam {
   backupTrack: string;
   ideaTitle: string;
   ideaSummary: string;
+  problemStatement?: string;
+  track?: string;
   paymentStatus: 'Pending' | 'Verified' | 'Rejected';
   paymentTransactionId: string;
   paymentScreenshotUrl?: string;
@@ -28,6 +66,7 @@ export interface RegisteredTeam {
   registeredAt: string;
   checkedIn: boolean;
   checkedInAt?: string;
+  submission?: ProjectSubmission;
 }
 
 export interface DomainTrack {

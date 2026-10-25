@@ -9,6 +9,8 @@ import {
   RuleItem,
   FAQItem,
   RegisteredTeam,
+  ProjectSubmission,
+  SubmissionNotification,
 } from '../types';
 import {
   initialEventConfig,
@@ -29,6 +31,7 @@ import {
   saveTeamToFirestore,
   updateTeamPaymentInFirestore,
   updateTeamCheckInInFirestore,
+  updateTeamSubmissionInFirestore,
   subscribeFirestoreTeams,
   testFirestoreConnection,
 } from '../lib/firebase';
@@ -38,6 +41,7 @@ import {
   fetchTeamsFromGoogleSheet,
   getOrCreateSpreadsheet,
 } from '../lib/googleSheets';
+import { sendTransactionalEmail, generateSubmissionNotificationEmailHtml } from '../lib/email';
 import type { User } from 'firebase/auth';
 
 interface HackathonContextType {
@@ -116,6 +120,35 @@ interface HackathonContextType {
   disconnectGoogleSheets: () => Promise<void>;
   syncGoogleSheets: () => Promise<{ success: boolean; spreadsheetUrl?: string; rowsSynced?: number; error?: string }>;
   fetchFromGoogleSheets: () => Promise<{ success: boolean; rowsFetched?: number; error?: string }>;
+
+  // Project PPT Submissions & Admin Alerts
+  submissionNotifications: SubmissionNotification[];
+  markNotificationAsRead: (id: string) => void;
+  markAllNotificationsAsRead: () => void;
+  submitProjectPresentation: (
+    teamId: string,
+    submissionData: {
+      projectTitle?: string;
+      projectTrack?: string;
+      problemStatement?: string;
+      ideaSummary?: string;
+      pptFileName?: string;
+      pptFileData?: string;
+      pptDeckUrl?: string;
+      githubUrl?: string;
+      demoUrl?: string;
+      techStack?: string[];
+    }
+  ) => Promise<{ success: boolean; error?: string }>;
+  evaluateProjectSubmission: (
+    teamId: string,
+    evaluation: {
+      status: ProjectSubmission['evaluationStatus'];
+      score?: number;
+      feedback?: string;
+      evaluatedBy?: string;
+    }
+  ) => Promise<{ success: boolean; error?: string }>;
 }
 
 const HackathonContext = createContext<HackathonContextType | undefined>(undefined);
@@ -205,6 +238,23 @@ export const HackathonProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     return localStorage.getItem('ideation_auto_sync_sheets') !== 'false';
   });
   const isGoogleSheetsConnected = Boolean(googleUser || googleAccessToken);
+
+  // Project PPT Submissions & Admin Alerts State
+  const [submissionNotifications, setSubmissionNotifications] = useState<SubmissionNotification[]>(() => {
+    const saved = localStorage.getItem('ideation_submission_notifications');
+    if (saved) {
+      try {
+        return JSON.parse(saved);
+      } catch {
+        return [];
+      }
+    }
+    return [];
+  });
+
+  useEffect(() => {
+    localStorage.setItem('ideation_submission_notifications', JSON.stringify(submissionNotifications));
+  }, [submissionNotifications]);
 
   useEffect(() => {
     localStorage.setItem('ideation_auto_sync_sheets', String(autoSyncGoogleSheets));
@@ -693,6 +743,217 @@ export const HackathonProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     return { success: true, checkedIn: newStatus };
   };
 
+  const markNotificationAsRead = (id: string) => {
+    setSubmissionNotifications(prev =>
+      prev.map(n => (n.id === id ? { ...n, read: true } : n))
+    );
+  };
+
+  const markAllNotificationsAsRead = () => {
+    setSubmissionNotifications(prev => prev.map(n => ({ ...n, read: true })));
+  };
+
+  const submitProjectPresentation = async (
+    teamId: string,
+    submissionData: {
+      projectTitle?: string;
+      projectTrack?: string;
+      problemStatement?: string;
+      ideaSummary?: string;
+      pptFileName?: string;
+      pptFileData?: string;
+      pptDeckUrl?: string;
+      githubUrl?: string;
+      demoUrl?: string;
+      techStack?: string[];
+    }
+  ): Promise<{ success: boolean; error?: string }> => {
+    try {
+      const team = registeredTeams.find(t => t.id === teamId);
+      if (!team) {
+        return { success: false, error: 'Team not found with ID ' + teamId };
+      }
+
+      const leader = team.members.find(m => m.isLeader) || team.members[0];
+      const nowIso = new Date().toISOString();
+
+      const newSubmission: ProjectSubmission = {
+        submittedAt: team.submission?.submittedAt || nowIso,
+        updatedAt: nowIso,
+        projectTitle: (submissionData.projectTitle || team.ideaTitle || '').trim(),
+        projectTrack: submissionData.projectTrack || team.primaryTrack || team.track || 'General Track',
+        problemStatement: (submissionData.problemStatement || team.problemStatement || '').trim(),
+        ideaSummary: (submissionData.ideaSummary || team.ideaSummary || '').trim(),
+        pptFileName: submissionData.pptFileName || team.submission?.pptFileName,
+        pptFileData: submissionData.pptFileData || team.submission?.pptFileData,
+        pptDeckUrl: (submissionData.pptDeckUrl || team.submission?.pptDeckUrl || '').trim(),
+        githubUrl: (submissionData.githubUrl || team.submission?.githubUrl || '').trim(),
+        demoUrl: (submissionData.demoUrl || team.submission?.demoUrl || '').trim(),
+        techStack: submissionData.techStack || team.submission?.techStack || [],
+        evaluationStatus: team.submission?.evaluationStatus || 'Under Review',
+        score: team.submission?.score,
+        feedback: team.submission?.feedback,
+        evaluatedBy: team.submission?.evaluatedBy,
+        evaluatedAt: team.submission?.evaluatedAt,
+      };
+
+      const updatedTeam: RegisteredTeam = {
+        ...team,
+        submission: newSubmission,
+        ideaTitle: newSubmission.projectTitle || team.ideaTitle,
+        ideaSummary: newSubmission.ideaSummary || team.ideaSummary,
+      };
+
+      // 1. Update React State
+      setRegisteredTeams(prev => prev.map(t => (t.id === teamId ? updatedTeam : t)));
+      if (currentTeamSession?.id === teamId) {
+        setCurrentTeamSession(updatedTeam);
+      }
+
+      // 2. Persist to Firestore
+      await updateTeamSubmissionInFirestore(teamId, newSubmission);
+
+      // 3. Persist to Central Database Server API
+      fetch(`/api/teams/${encodeURIComponent(teamId)}/submission`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(newSubmission),
+      }).catch(err => {
+        console.warn('Central DB submission sync warning:', err);
+      });
+
+      // 4. Create and record Admin Notification
+      const newNotif: SubmissionNotification = {
+        id: `notif-${Date.now()}-${Math.random().toString(36).substr(2, 6)}`,
+        teamId: team.id,
+        teamName: team.teamName,
+        leaderName: leader ? leader.name : 'Team Leader',
+        leaderEmail: leader ? leader.email : '',
+        leaderPhone: leader ? leader.phone : '',
+        projectTitle: newSubmission.projectTitle,
+        projectTrack: newSubmission.projectTrack,
+        pptFileName: newSubmission.pptFileName,
+        pptDeckUrl: newSubmission.pptDeckUrl,
+        submittedAt: newSubmission.updatedAt || newSubmission.submittedAt,
+        read: false,
+      };
+
+      setSubmissionNotifications(prev => [newNotif, ...prev.filter(n => n.teamId !== teamId)]);
+
+      // 5. Send Real-Time Alert Email to Admin
+      try {
+        const formattedDate = new Date(newSubmission.updatedAt || newSubmission.submittedAt).toLocaleString('en-IN', {
+          timeZone: 'Asia/Kolkata',
+          dateStyle: 'medium',
+          timeStyle: 'short',
+        });
+
+        const emailHtml = generateSubmissionNotificationEmailHtml({
+          teamId: team.id,
+          teamName: team.teamName,
+          college: team.college,
+          leaderName: leader ? leader.name : 'Team Leader',
+          leaderEmail: leader ? leader.email : 'N/A',
+          leaderPhone: leader ? leader.phone : 'N/A',
+          projectTitle: newSubmission.projectTitle,
+          projectTrack: newSubmission.projectTrack,
+          pptFileName: newSubmission.pptFileName,
+          pptDeckUrl: newSubmission.pptDeckUrl,
+          githubUrl: newSubmission.githubUrl,
+          demoUrl: newSubmission.demoUrl,
+          techStack: newSubmission.techStack,
+          submittedAt: formattedDate,
+        });
+
+        await sendTransactionalEmail({
+          to: 'ktarunkumar1832@gmail.com',
+          subject: `[IDEATION 2026] Project PPT Submitted: Team ${team.teamName} (${team.id})`,
+          html: emailHtml,
+        });
+      } catch (emailErr) {
+        console.warn('Admin notification email dispatch error:', emailErr);
+      }
+
+      // 6. Multi-tab broadcast
+      try {
+        const channel = new BroadcastChannel('ideation_live_sync');
+        channel.postMessage({ type: 'NEW_SUBMISSION', teamId });
+        channel.close();
+      } catch {}
+
+      return { success: true };
+    } catch (err: any) {
+      console.error('submitProjectPresentation error:', err);
+      return { success: false, error: err.message || 'Submission failed' };
+    }
+  };
+
+  const evaluateProjectSubmission = async (
+    teamId: string,
+    evaluation: {
+      status: ProjectSubmission['evaluationStatus'];
+      score?: number;
+      feedback?: string;
+      evaluatedBy?: string;
+    }
+  ): Promise<{ success: boolean; error?: string }> => {
+    try {
+      const team = registeredTeams.find(t => t.id === teamId);
+      if (!team) {
+        return { success: false, error: 'Team not found' };
+      }
+
+      const existingSubmission: ProjectSubmission = team.submission || {
+        submittedAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        projectTitle: team.ideaTitle || 'Untitled Project',
+        projectTrack: team.primaryTrack || 'General',
+        evaluationStatus: 'Under Review',
+      };
+
+      const updatedSubmission: ProjectSubmission = {
+        ...existingSubmission,
+        evaluationStatus: evaluation.status,
+        score: evaluation.score !== undefined ? evaluation.score : existingSubmission.score,
+        feedback: evaluation.feedback !== undefined ? evaluation.feedback : existingSubmission.feedback,
+        evaluatedBy: evaluation.evaluatedBy || 'Jury Panel',
+        evaluatedAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      };
+
+      const updatedTeam: RegisteredTeam = {
+        ...team,
+        submission: updatedSubmission,
+      };
+
+      setRegisteredTeams(prev => prev.map(t => (t.id === teamId ? updatedTeam : t)));
+      if (currentTeamSession?.id === teamId) {
+        setCurrentTeamSession(updatedTeam);
+      }
+
+      await updateTeamSubmissionInFirestore(teamId, updatedSubmission);
+
+      fetch(`/api/teams/${encodeURIComponent(teamId)}/evaluation`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(evaluation),
+      }).catch(err => {
+        console.warn('Central DB evaluation update warning:', err);
+      });
+
+      try {
+        const channel = new BroadcastChannel('ideation_live_sync');
+        channel.postMessage({ type: 'EVALUATION_UPDATED', teamId });
+        channel.close();
+      } catch {}
+
+      return { success: true };
+    } catch (err: any) {
+      console.error('evaluateProjectSubmission error:', err);
+      return { success: false, error: err.message || 'Evaluation update failed' };
+    }
+  };
+
   // Helper for CSV escaping
   const escapeCsv = (val: unknown): string => {
     if (val === null || val === undefined) return '""';
@@ -983,6 +1244,11 @@ export const HackathonProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         disconnectGoogleSheets,
         syncGoogleSheets,
         fetchFromGoogleSheets,
+        submissionNotifications,
+        markNotificationAsRead,
+        markAllNotificationsAsRead,
+        submitProjectPresentation,
+        evaluateProjectSubmission,
       }}
     >
       {children}
