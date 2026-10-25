@@ -16,6 +16,7 @@ export const initialEventConfig: EventConfig = {
   collegeName: 'Bapuji Institute of Engineering & Technology (BIET), Davangere',
   clubName: 'Anveshan Club',
   registrationOpen: true,
+  pptSubmissionsOpen: true,
   registrationDeadline: '2026-11-15T23:59:59+05:30',
   maxTeamsLimit: 120,
   upiId: (import.meta.env.VITE_UPI_ID as string) || 'anveshan.biet@upi',

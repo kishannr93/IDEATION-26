@@ -489,10 +489,17 @@ app.put('/api/teams/:id/submission', (req: Request, res: Response) => {
   }
 
   const team = teams[idx];
+  const previousCount = team.submission?.submissionCount || (team.submission?.submittedAt ? 1 : 0);
+  if (previousCount >= 2) {
+    return res.status(400).json({ success: false, error: 'Maximum submission limit reached (2 submissions allowed per team).' });
+  }
+  const submissionCount = previousCount + 1;
+
   const nowIso = new Date().toISOString();
   const updatedSubmission = {
     submittedAt: team.submission?.submittedAt || nowIso,
     updatedAt: nowIso,
+    submissionCount,
     projectTitle: submissionData.projectTitle || team.ideaTitle || 'Untitled Project',
     projectTrack: submissionData.projectTrack || team.primaryTrack,
     problemStatement: submissionData.problemStatement || '',

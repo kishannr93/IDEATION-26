@@ -769,10 +769,26 @@ export const HackathonProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     }
   ): Promise<{ success: boolean; error?: string }> => {
     try {
+      if (eventConfig.pptSubmissionsOpen === false) {
+        return {
+          success: false,
+          error: 'PPT Submissions are currently closed by the organizers. New submissions or updates are not accepted at this time.',
+        };
+      }
+
       const team = registeredTeams.find(t => t.id === teamId);
       if (!team) {
         return { success: false, error: 'Team not found with ID ' + teamId };
       }
+
+      const previousCount = team.submission?.submissionCount || (team.submission?.submittedAt ? 1 : 0);
+      if (previousCount >= 2) {
+        return {
+          success: false,
+          error: 'Maximum submission limit reached (each team is permitted a maximum of 2 submissions).',
+        };
+      }
+      const newSubmissionCount = previousCount + 1;
 
       const leader = team.members.find(m => m.isLeader) || team.members[0];
       const nowIso = new Date().toISOString();
@@ -780,6 +796,7 @@ export const HackathonProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       const newSubmission: ProjectSubmission = {
         submittedAt: team.submission?.submittedAt || nowIso,
         updatedAt: nowIso,
+        submissionCount: newSubmissionCount,
         projectTitle: (submissionData.projectTitle || team.ideaTitle || '').trim(),
         projectTrack: submissionData.projectTrack || team.primaryTrack || team.track || 'General Track',
         problemStatement: (submissionData.problemStatement || team.problemStatement || '').trim(),

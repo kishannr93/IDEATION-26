@@ -34,11 +34,13 @@ import {
   ChevronRight,
   Layers,
   HelpCircle,
+  AlertCircle,
   X,
 } from 'lucide-react';
 
 export const ParticipantDashboard: React.FC = () => {
   const {
+    eventConfig,
     registeredTeams,
     currentTeamSession,
     setCurrentTeamSession,
@@ -251,6 +253,9 @@ export const ParticipantDashboard: React.FC = () => {
   };
 
   const submission = currentTeamSession?.submission;
+  const isPptOpen = eventConfig?.pptSubmissionsOpen !== false;
+  const submissionCount = submission?.submissionCount || (submission?.submittedAt ? 1 : 0);
+  const canSubmitAgain = isPptOpen && submissionCount < 2;
 
   return (
     <div className="min-h-screen py-16 px-4 sm:px-6 lg:px-8 bg-[#050B1A] relative text-white">
@@ -515,47 +520,72 @@ export const ParticipantDashboard: React.FC = () => {
                           Submission Pending
                         </span>
                       )}
+                      <span className={`font-mono text-[11px] px-2.5 py-0.5 rounded border font-bold ${
+                        !isPptOpen
+                          ? 'bg-rose-500/20 text-rose-300 border-rose-400/40'
+                          : submissionCount >= 2
+                          ? 'bg-amber-500/20 text-amber-300 border-amber-400/40'
+                          : 'bg-emerald-500/20 text-emerald-300 border-emerald-400/40'
+                      }`}>
+                        {!isPptOpen ? 'Submissions Closed' : `${submissionCount}/2 Submissions Used`}
+                      </span>
                     </div>
                     <h2 className="text-xl sm:text-2xl font-black font-display text-white flex items-center gap-2">
                       <Award className="w-6 h-6 text-[#35E0FF]" />
                       <span>Project PPT & Pitch Deck Submission</span>
                     </h2>
                     <p className="text-xs text-[#9DB0D0] mt-1">
-                      Download the official BIET presentation template, complete your slides, and submit your project deck for jury review.
+                      Complete your pitch deck and submit your project for review. Each team can submit their presentation deck a maximum of 2 times.
                     </p>
                   </div>
 
                   <div className="flex flex-wrap items-center gap-2 shrink-0">
                     <button
-                      onClick={handleDownloadPptTemplate}
-                      disabled={isDownloadingTemplate}
-                      className="px-3.5 py-2 rounded-xl text-xs font-bold text-white bg-[#0C1630] border border-[#35E0FF]/40 hover:bg-[#132247] flex items-center gap-1.5 transition-all cursor-pointer shadow-sm"
-                    >
-                      <Download className="w-4 h-4 text-[#35E0FF]" />
-                      <span>{isDownloadingTemplate ? 'Generating...' : 'Download PPT Template'}</span>
-                    </button>
-
-                    <button
                       onClick={() => setShowGuidelinesModal(true)}
-                      className="px-3 py-2 rounded-xl text-xs font-mono text-[#9DB0D0] hover:text-white bg-[#0C1630] border border-[#78AAFF]/20 hover:border-[#35E0FF] transition-all cursor-pointer"
+                      className="px-3.5 py-2 rounded-xl text-xs font-mono text-[#9DB0D0] hover:text-white bg-[#0C1630] border border-[#78AAFF]/20 hover:border-[#35E0FF] transition-all cursor-pointer"
                     >
                       Slide Structure
                     </button>
 
-                    <button
-                      onClick={() => setShowSubmissionModal(true)}
-                      className="px-4 py-2 rounded-xl text-xs font-bold text-white bg-gradient-to-r from-[#FF8A2A] to-[#F5611A] shadow-[0_0_20px_rgba(255,138,42,0.4)] hover:brightness-110 active:scale-95 transition-all flex items-center gap-1.5 cursor-pointer"
-                    >
-                      <UploadCloud className="w-4 h-4" />
-                      <span>{submission ? 'Update PPT Submission' : 'Submit Project PPT'}</span>
-                    </button>
+                    {!isPptOpen ? (
+                      <div className="px-4 py-2 rounded-xl text-xs font-bold text-rose-300 bg-rose-500/15 border border-rose-500/30 flex items-center gap-1.5 cursor-not-allowed">
+                        <XCircle className="w-4 h-4 text-rose-400" />
+                        <span>Submissions Closed</span>
+                      </div>
+                    ) : submissionCount >= 2 ? (
+                      <div className="px-4 py-2 rounded-xl text-xs font-bold text-amber-300 bg-amber-500/15 border border-amber-500/30 flex items-center gap-1.5 cursor-not-allowed">
+                        <CheckCircle className="w-4 h-4 text-amber-400" />
+                        <span>Max 2 Submissions Used</span>
+                      </div>
+                    ) : (
+                      <button
+                        onClick={() => setShowSubmissionModal(true)}
+                        className="px-4 py-2 rounded-xl text-xs font-bold text-white bg-gradient-to-r from-[#FF8A2A] to-[#F5611A] shadow-[0_0_20px_rgba(255,138,42,0.4)] hover:brightness-110 active:scale-95 transition-all flex items-center gap-1.5 cursor-pointer"
+                      >
+                        <UploadCloud className="w-4 h-4" />
+                        <span>{submission ? `Update PPT (${submissionCount + 1} of 2)` : 'Submit Project PPT (Attempt 1 of 2)'}</span>
+                      </button>
+                    )}
                   </div>
                 </div>
+
+                {/* Closed Alert Banner if admin stopped submissions */}
+                {!isPptOpen && (
+                  <div className="mt-4 p-4 rounded-2xl bg-rose-500/15 border border-rose-500/40 text-rose-200 text-xs flex items-center gap-3">
+                    <AlertCircle className="w-5 h-5 text-rose-400 shrink-0" />
+                    <div>
+                      <div className="font-bold text-white text-sm">PPT Submissions are Currently Closed</div>
+                      <p className="text-rose-200/80 mt-0.5">
+                        The organizing committee has stopped accepting PPT submissions and revisions. If you require emergency assistance, please contact the helpline.
+                      </p>
+                    </div>
+                  </div>
+                )}
 
                 {/* Submission State Display */}
                 {submission ? (
                   <div className="mt-6 space-y-6">
-                    {/* Status Highlights */}
+                    {/* Status Highlights (NO jury score or jury name displayed) */}
                     <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
                       <div className="p-4 rounded-2xl bg-[#0C1630] border border-[#78AAFF]/20">
                         <span className="text-[10px] font-mono uppercase text-[#9DB0D0] block mb-1">
@@ -572,19 +602,19 @@ export const ParticipantDashboard: React.FC = () => {
 
                       <div className="p-4 rounded-2xl bg-[#0C1630] border border-[#78AAFF]/20">
                         <span className="text-[10px] font-mono uppercase text-[#9DB0D0] block mb-1">
-                          Jury Evaluation Score
+                          Submission Attempts
                         </span>
                         <div className="font-display font-bold text-base flex items-center gap-1.5">
-                          {submission.score !== undefined ? (
-                            <span className="text-2xl text-[#35E0FF] font-black">
-                              {submission.score} <span className="text-xs text-[#9DB0D0] font-normal">/ 100</span>
-                            </span>
-                          ) : (
-                            <span className="text-xs text-amber-300 font-mono">Awaiting Jury Review</span>
-                          )}
+                          <span className="text-xl text-[#35E0FF] font-black">
+                            {submissionCount} <span className="text-xs text-[#9DB0D0] font-normal">/ 2 attempts used</span>
+                          </span>
                         </div>
-                        <div className="text-[10px] text-[#9DB0D0] mt-1">
-                          {submission.evaluatedBy ? `Evaluated by: ${submission.evaluatedBy}` : 'Scores posted after presentation'}
+                        <div className="text-[10px] text-[#9DB0D0] mt-1 font-mono">
+                          {submissionCount >= 2 ? (
+                            <span className="text-amber-400 font-bold">Maximum limit reached (Locked)</span>
+                          ) : (
+                            <span className="text-emerald-400 font-bold">1 revision attempt remaining</span>
+                          )}
                         </div>
                       </div>
 
@@ -704,12 +734,12 @@ export const ParticipantDashboard: React.FC = () => {
                         </div>
                       )}
 
-                      {/* Jury Feedback Notes (if graded) */}
+                      {/* Review Feedback Notes without displaying jury names or scores */}
                       {submission.feedback && (
                         <div className="mt-4 p-4 rounded-xl bg-purple-500/10 border border-purple-500/30 text-purple-200 text-xs">
                           <div className="font-bold text-white flex items-center gap-1.5 mb-1">
                             <Sparkles className="w-4 h-4 text-purple-400" />
-                            <span>Jury Feedback & Comments</span>
+                            <span>Review Notes & Feedback</span>
                           </div>
                           <p className="leading-relaxed text-purple-200/90">{submission.feedback}</p>
                         </div>
@@ -725,27 +755,25 @@ export const ParticipantDashboard: React.FC = () => {
                     <div className="max-w-md mx-auto">
                       <h3 className="font-bold text-base text-white">Your Project Presentation Has Not Been Submitted Yet</h3>
                       <p className="text-xs text-[#9DB0D0] mt-1 leading-relaxed">
-                        Teams must submit their PowerPoint presentation (.pptx) or Google Slides deck before 15 November 2026. Admin and jury will review your submission and award evaluation scores.
+                        Teams must submit their PowerPoint presentation (.pptx) or Google Slides deck. Each team is permitted a maximum of 2 submission attempts.
                       </p>
                     </div>
 
                     <div className="flex flex-wrap items-center justify-center gap-3 pt-2">
-                      <button
-                        onClick={handleDownloadPptTemplate}
-                        disabled={isDownloadingTemplate}
-                        className="px-4 py-2.5 rounded-xl text-xs font-bold text-white bg-[#081024] border border-[#35E0FF]/40 hover:bg-[#132247] flex items-center gap-2 cursor-pointer shadow-md"
-                      >
-                        <Download className="w-4 h-4 text-[#35E0FF]" />
-                        <span>Download 10-Slide Template (.pptx)</span>
-                      </button>
-
-                      <button
-                        onClick={() => setShowSubmissionModal(true)}
-                        className="px-5 py-2.5 rounded-xl text-xs font-bold text-white bg-gradient-to-r from-[#FF8A2A] to-[#F5611A] shadow-[0_0_20px_rgba(255,138,42,0.4)] hover:brightness-110 active:scale-95 transition-all flex items-center gap-2 cursor-pointer"
-                      >
-                        <UploadCloud className="w-4 h-4" />
-                        <span>Submit Project PPT Now</span>
-                      </button>
+                      {!isPptOpen ? (
+                        <div className="px-5 py-2.5 rounded-xl text-xs font-bold text-rose-300 bg-rose-500/15 border border-rose-500/30 flex items-center gap-2">
+                          <XCircle className="w-4 h-4 text-rose-400" />
+                          <span>PPT Submissions Closed by Organizers</span>
+                        </div>
+                      ) : (
+                        <button
+                          onClick={() => setShowSubmissionModal(true)}
+                          className="px-5 py-2.5 rounded-xl text-xs font-bold text-white bg-gradient-to-r from-[#FF8A2A] to-[#F5611A] shadow-[0_0_20px_rgba(255,138,42,0.4)] hover:brightness-110 active:scale-95 transition-all flex items-center gap-2 cursor-pointer"
+                        >
+                          <UploadCloud className="w-4 h-4" />
+                          <span>Submit Project PPT Now (Attempt 1 of 2)</span>
+                        </button>
+                      )}
                     </div>
                   </div>
                 )}
@@ -945,18 +973,37 @@ export const ParticipantDashboard: React.FC = () => {
                 <UploadCloud className="w-5 h-5" />
               </div>
               <div>
-                <span className="text-[10px] font-mono text-[#35E0FF] font-bold uppercase tracking-wider">
-                  Official Pitch Deck Submission · Team {currentTeamSession.id}
-                </span>
+                <div className="flex items-center gap-2">
+                  <span className="text-[10px] font-mono text-[#35E0FF] font-bold uppercase tracking-wider">
+                    Pitch Deck Submission · Team {currentTeamSession.id}
+                  </span>
+                  <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-[#35E0FF]/15 text-[#35E0FF] border border-[#35E0FF]/30">
+                    Attempt {Math.min(submissionCount + 1, 2)} of 2
+                  </span>
+                </div>
                 <h3 className="text-xl font-bold font-display text-white">
-                  Submit Project Presentation
+                  {submission ? 'Revise Project Presentation' : 'Submit Project Presentation'}
                 </h3>
               </div>
             </div>
 
-            <p className="text-xs text-[#9DB0D0] mb-6">
-              Upload your completed PowerPoint presentation file (.pptx / .pdf) or paste a public Google Slides/Canva link. Admin and jury will receive an immediate notification to review your submission.
+            <p className="text-xs text-[#9DB0D0] mb-4">
+              Upload your completed PowerPoint presentation file (.pptx / .pdf) or paste a public Google Slides/Canva link. Each registered team is permitted a maximum of 2 submission attempts.
             </p>
+
+            {!isPptOpen && (
+              <div className="mb-4 p-3.5 rounded-xl text-xs bg-rose-500/15 border border-rose-400 text-rose-300 flex items-center gap-2">
+                <AlertCircle className="w-4 h-4 shrink-0" />
+                <span>PPT Submissions are currently closed by the organizers.</span>
+              </div>
+            )}
+
+            {submissionCount >= 2 && (
+              <div className="mb-4 p-3.5 rounded-xl text-xs bg-amber-500/15 border border-amber-400 text-amber-300 flex items-center gap-2">
+                <CheckCircle className="w-4 h-4 shrink-0" />
+                <span>You have used both of your 2 permitted submission attempts. Further revisions are locked.</span>
+              </div>
+            )}
 
             {submissionFeedback && (
               <div
@@ -1132,15 +1179,16 @@ export const ParticipantDashboard: React.FC = () => {
               </div>
 
               {/* Action Buttons */}
-              <div className="pt-4 border-t border-[#78AAFF]/20 flex items-center justify-between gap-3">
-                <button
-                  type="button"
-                  onClick={handleDownloadPptTemplate}
-                  className="text-xs text-[#35E0FF] hover:underline flex items-center gap-1 font-mono cursor-pointer"
-                >
-                  <Download className="w-3.5 h-3.5" />
-                  <span>Download Blank Template</span>
-                </button>
+              <div className="pt-4 border-t border-[#78AAFF]/20 flex flex-col sm:flex-row items-center justify-between gap-3">
+                <span className="text-[11px] font-mono text-[#9DB0D0]">
+                  {submissionCount >= 2 ? (
+                    <span className="text-amber-400 font-bold">Limit: 2/2 attempts used (No further submissions)</span>
+                  ) : !isPptOpen ? (
+                    <span className="text-rose-400 font-bold">Submissions currently stopped by Admin</span>
+                  ) : (
+                    <span>Max 2 submissions permitted per team</span>
+                  )}
+                </span>
 
                 <div className="flex items-center gap-2">
                   <button
@@ -1156,18 +1204,22 @@ export const ParticipantDashboard: React.FC = () => {
 
                   <button
                     type="submit"
-                    disabled={submittingPpt}
-                    className="px-6 py-2.5 rounded-xl text-xs font-bold text-white bg-gradient-to-r from-[#FF8A2A] to-[#F5611A] shadow-[0_0_20px_rgba(255,138,42,0.4)] hover:brightness-110 active:scale-95 transition-all flex items-center gap-2 cursor-pointer disabled:opacity-50"
+                    disabled={submittingPpt || !canSubmitAgain}
+                    className="px-6 py-2.5 rounded-xl text-xs font-bold text-white bg-gradient-to-r from-[#FF8A2A] to-[#F5611A] shadow-[0_0_20px_rgba(255,138,42,0.4)] hover:brightness-110 active:scale-95 transition-all flex items-center gap-2 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
                   >
                     {submittingPpt ? (
                       <>
                         <Clock className="w-4 h-4 animate-spin" />
                         <span>Submitting to Jury...</span>
                       </>
+                    ) : !isPptOpen ? (
+                      <span>Submissions Closed</span>
+                    ) : submissionCount >= 2 ? (
+                      <span>Max Attempts Used</span>
                     ) : (
                       <>
                         <UploadCloud className="w-4 h-4" />
-                        <span>Submit Project Presentation</span>
+                        <span>{submission ? `Submit Revision (${submissionCount + 1} of 2)` : 'Submit Presentation (Attempt 1 of 2)'}</span>
                       </>
                     )}
                   </button>

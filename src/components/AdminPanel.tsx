@@ -200,7 +200,10 @@ export const AdminPanel: React.FC = () => {
     phone: '',
     email: '',
     showPhonePublicly: true,
+    photoUrl: '',
   });
+  const [editingPhotoMember, setEditingPhotoMember] = useState<CoreTeamMember | null>(null);
+  const [photoModalInput, setPhotoModalInput] = useState('');
 
   // Schedule Admin State
   const [newScheduleEvent, setNewScheduleEvent] = useState<Omit<ScheduleEvent, 'id'>>({
@@ -489,6 +492,7 @@ export const AdminPanel: React.FC = () => {
       email: newMember.email || undefined,
       showPhonePublicly: newMember.showPhonePublicly,
       order: coreTeam.length + 1,
+      photoUrl: newMember.photoUrl.trim() || undefined,
     });
     setNewMember({
       name: '',
@@ -497,6 +501,7 @@ export const AdminPanel: React.FC = () => {
       phone: '',
       email: '',
       showPhonePublicly: true,
+      photoUrl: '',
     });
   };
 
@@ -1471,6 +1476,63 @@ export const AdminPanel: React.FC = () => {
                   </div>
                 </div>
 
+                {/* PPT Submissions Portal Status & Control Banner */}
+                <div
+                  className={`p-5 rounded-2xl border flex flex-col sm:flex-row items-center justify-between gap-4 transition-all ${
+                    eventConfig.pptSubmissionsOpen === false
+                      ? 'bg-rose-950/40 border-rose-500/50 shadow-[0_0_30px_rgba(244,63,94,0.15)]'
+                      : 'bg-emerald-950/30 border-emerald-500/40 shadow-[0_0_30px_rgba(16,185,129,0.1)]'
+                  }`}
+                >
+                  <div className="flex items-center gap-3.5">
+                    <div
+                      className={`w-3.5 h-3.5 rounded-full shrink-0 ${
+                        eventConfig.pptSubmissionsOpen === false
+                          ? 'bg-rose-500 shadow-[0_0_12px_#f43f5e]'
+                          : 'bg-emerald-400 shadow-[0_0_12px_#34d399] animate-pulse'
+                      }`}
+                    />
+                    <div>
+                      <div className="font-bold text-white text-sm flex items-center gap-2">
+                        <span>PPT Submissions Portal: {eventConfig.pptSubmissionsOpen === false ? 'CLOSED (Stopped)' : 'OPEN & ACCEPTING SUBMISSIONS'}</span>
+                        <span
+                          className={`px-2 py-0.5 rounded text-[10px] font-mono font-bold uppercase ${
+                            eventConfig.pptSubmissionsOpen === false ? 'bg-rose-500/20 text-rose-300 border border-rose-500/40' : 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40'
+                          }`}
+                        >
+                          {eventConfig.pptSubmissionsOpen === false ? 'Locked' : 'Active'}
+                        </span>
+                      </div>
+                      <p className="text-xs text-[#9DB0D0] mt-0.5">
+                        {eventConfig.pptSubmissionsOpen === false
+                          ? 'Participants cannot upload new pitch decks or edit their existing presentations in the Participant Dashboard.'
+                          : 'Teams can submit and update their PowerPoint presentation or deck up to 2 times.'}
+                      </p>
+                    </div>
+                  </div>
+
+                  <button
+                    onClick={() => updateEventConfig({ pptSubmissionsOpen: eventConfig.pptSubmissionsOpen === false ? true : false })}
+                    className={`px-5 py-2.5 rounded-xl text-xs font-bold transition-all shadow-lg shrink-0 flex items-center gap-2 cursor-pointer ${
+                      eventConfig.pptSubmissionsOpen === false
+                        ? 'bg-emerald-600 hover:bg-emerald-500 text-white shadow-emerald-500/25'
+                        : 'bg-rose-600 hover:bg-rose-500 text-white shadow-rose-500/25'
+                    }`}
+                  >
+                    {eventConfig.pptSubmissionsOpen === false ? (
+                      <>
+                        <CheckCircle className="w-4 h-4" />
+                        <span>Reopen PPT Submissions</span>
+                      </>
+                    ) : (
+                      <>
+                        <XCircle className="w-4 h-4" />
+                        <span>Stop Taking PPT Submissions</span>
+                      </>
+                    )}
+                  </button>
+                </div>
+
                 {/* Submissions KPI Counters */}
                 <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
                   <div className="p-5 rounded-2xl bg-[#0C1630] border border-[#78AAFF]/20">
@@ -1564,7 +1626,7 @@ export const AdminPanel: React.FC = () => {
                         >
                           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-[#78AAFF]/15">
                             <div>
-                              <div className="flex items-center gap-2">
+                              <div className="flex flex-wrap items-center gap-2">
                                 <span className="font-mono text-xs font-bold text-[#35E0FF] bg-[#35E0FF]/15 px-2 py-0.5 rounded border border-[#35E0FF]/30">
                                   {team.id}
                                 </span>
@@ -1572,6 +1634,9 @@ export const AdminPanel: React.FC = () => {
                                   {team.teamName}
                                 </h4>
                                 <span className="text-xs text-[#9DB0D0]">· {team.college}</span>
+                                <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-[#132247] text-cyan-300 border border-cyan-400/30">
+                                  Attempt {sub.submissionCount || 1}/2
+                                </span>
                               </div>
                               <div className="text-xs text-[#9DB0D0] mt-1">
                                 <span className="text-[#35E0FF] font-semibold">{sub.projectTrack || team.primaryTrack}</span>
@@ -1951,16 +2016,28 @@ export const AdminPanel: React.FC = () => {
                     </div>
                   </div>
 
-                  <div className="pt-3 border-t border-[#78AAFF]/15 flex items-center justify-between">
-                    <label className="flex items-center gap-2 cursor-pointer text-xs text-white">
-                      <input
-                        type="checkbox"
-                        checked={eventConfig.registrationOpen}
-                        onChange={(e) => updateEventConfig({ registrationOpen: e.target.checked })}
-                        className="rounded text-[#35E0FF]"
-                      />
-                      <span>Registrations Open (Uncheck to temporarily close portal)</span>
-                    </label>
+                  <div className="pt-3 border-t border-[#78AAFF]/15 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                    <div className="flex flex-col sm:flex-row sm:items-center gap-4">
+                      <label className="flex items-center gap-2 cursor-pointer text-xs text-white">
+                        <input
+                          type="checkbox"
+                          checked={eventConfig.registrationOpen}
+                          onChange={(e) => updateEventConfig({ registrationOpen: e.target.checked })}
+                          className="rounded text-[#35E0FF]"
+                        />
+                        <span>Registrations Open</span>
+                      </label>
+
+                      <label className="flex items-center gap-2 cursor-pointer text-xs text-white">
+                        <input
+                          type="checkbox"
+                          checked={eventConfig.pptSubmissionsOpen !== false}
+                          onChange={(e) => updateEventConfig({ pptSubmissionsOpen: e.target.checked })}
+                          className="rounded text-[#35E0FF]"
+                        />
+                        <span>Accept Project PPT Submissions</span>
+                      </label>
+                    </div>
 
                     <span className="text-[11px] font-mono text-emerald-400">All edits sync live across site</span>
                   </div>
@@ -1973,117 +2050,395 @@ export const AdminPanel: React.FC = () => {
               <div className="space-y-6">
                 {/* Add member card */}
                 <div className="p-6 rounded-2xl bg-[#0C1630] border border-[#78AAFF]/20">
-                  <h3 className="font-display font-bold text-base text-white mb-4">Add Committee Member</h3>
-                  <form onSubmit={handleAddMember} className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">
-                    <div>
-                      <label className="block text-[#9DB0D0] mb-1">Full Name *</label>
-                      <input
-                        type="text"
-                        required
-                        placeholder="e.g. Prof. Radhika Priya Y R"
-                        value={newMember.name}
-                        onChange={(e) => setNewMember({ ...newMember, name: e.target.value })}
-                        className="w-full px-3 py-2 bg-[#081024] border border-[#78AAFF]/20 rounded-xl text-white focus:outline-none focus:border-[#35E0FF]"
-                      />
+                  <h3 className="font-display font-bold text-base text-white mb-4 flex items-center justify-between">
+                    <span>Add Committee Member</span>
+                    <span className="text-xs font-mono text-[#35E0FF]">Supports Profile Photo & Initials</span>
+                  </h3>
+                  <form onSubmit={handleAddMember} className="space-y-4 text-xs">
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                      <div>
+                        <label className="block text-[#9DB0D0] mb-1">Full Name *</label>
+                        <input
+                          type="text"
+                          required
+                          placeholder="e.g. Prof. Radhika Priya Y R"
+                          value={newMember.name}
+                          onChange={(e) => setNewMember({ ...newMember, name: e.target.value })}
+                          className="w-full px-3 py-2 bg-[#081024] border border-[#78AAFF]/20 rounded-xl text-white focus:outline-none focus:border-[#35E0FF]"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-[#9DB0D0] mb-1">Role / Designation *</label>
+                        <input
+                          type="text"
+                          required
+                          placeholder="e.g. Lead Student Co-ordinator"
+                          value={newMember.role}
+                          onChange={(e) => setNewMember({ ...newMember, role: e.target.value })}
+                          className="w-full px-3 py-2 bg-[#081024] border border-[#78AAFF]/20 rounded-xl text-white focus:outline-none focus:border-[#35E0FF]"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-[#9DB0D0] mb-1">Category</label>
+                        <select
+                          value={newMember.category}
+                          onChange={(e) => setNewMember({ ...newMember, category: e.target.value as any })}
+                          className="w-full px-3 py-2 bg-[#081024] border border-[#78AAFF]/20 rounded-xl text-white focus:outline-none focus:border-[#35E0FF]"
+                        >
+                          <option value="Faculty">Faculty</option>
+                          <option value="Student Co-ordinator">Student Co-ordinator</option>
+                          <option value="Contact Helpline">Contact Helpline</option>
+                        </select>
+                      </div>
+
+                      <div>
+                        <label className="block text-[#9DB0D0] mb-1">Phone Number (optional)</label>
+                        <input
+                          type="text"
+                          placeholder="e.g. 97409 70278"
+                          value={newMember.phone}
+                          onChange={(e) => setNewMember({ ...newMember, phone: e.target.value })}
+                          className="w-full px-3 py-2 bg-[#081024] border border-[#78AAFF]/20 rounded-xl text-white focus:outline-none focus:border-[#35E0FF]"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-[#9DB0D0] mb-1">Email (optional)</label>
+                        <input
+                          type="email"
+                          placeholder="name@bietdvg.edu"
+                          value={newMember.email}
+                          onChange={(e) => setNewMember({ ...newMember, email: e.target.value })}
+                          className="w-full px-3 py-2 bg-[#081024] border border-[#78AAFF]/20 rounded-xl text-white focus:outline-none focus:border-[#35E0FF]"
+                        />
+                      </div>
+
+                      <div className="flex items-center gap-2 pt-5">
+                        <label className="flex items-center gap-2 cursor-pointer text-white">
+                          <input
+                            type="checkbox"
+                            checked={newMember.showPhonePublicly}
+                            onChange={(e) => setNewMember({ ...newMember, showPhonePublicly: e.target.checked })}
+                            className="rounded text-[#35E0FF]"
+                          />
+                          <span>Show Phone on Public Site</span>
+                        </label>
+                      </div>
                     </div>
 
-                    <div>
-                      <label className="block text-[#9DB0D0] mb-1">Role / Designation *</label>
-                      <input
-                        type="text"
-                        required
-                        placeholder="e.g. Lead Student Co-ordinator"
-                        value={newMember.role}
-                        onChange={(e) => setNewMember({ ...newMember, role: e.target.value })}
-                        className="w-full px-3 py-2 bg-[#081024] border border-[#78AAFF]/20 rounded-xl text-white focus:outline-none focus:border-[#35E0FF]"
-                      />
-                    </div>
+                    {/* Member Photo Controls */}
+                    <div className="p-4 rounded-xl bg-[#081024] border border-[#78AAFF]/15 flex flex-col sm:flex-row items-center gap-4">
+                      {/* Avatar preview */}
+                      <div className="shrink-0 text-center">
+                        <div className="w-14 h-14 rounded-2xl overflow-hidden border border-[#35E0FF]/40 bg-[#0C1630] flex items-center justify-center mx-auto shadow-md">
+                          {newMember.photoUrl ? (
+                            <img src={newMember.photoUrl} alt="Preview" className="w-full h-full object-cover" />
+                          ) : (
+                            <div className="font-display font-bold text-base text-[#35E0FF]">
+                              {newMember.name
+                                ? newMember.name
+                                    .replace(/^(prof\.|dr\.|mr\.|mrs\.|ms\.)\s+/i, '')
+                                    .split(/\s+/)
+                                    .map((n) => n[0])
+                                    .slice(0, 2)
+                                    .join('')
+                                    .toUpperCase()
+                                : 'TM'}
+                            </div>
+                          )}
+                        </div>
+                        <span className="text-[10px] text-[#9DB0D0] mt-1 block">
+                          {newMember.photoUrl ? 'Photo Preview' : 'Initials Fallback'}
+                        </span>
+                      </div>
 
-                    <div>
-                      <label className="block text-[#9DB0D0] mb-1">Category</label>
-                      <select
-                        value={newMember.category}
-                        onChange={(e) => setNewMember({ ...newMember, category: e.target.value as any })}
-                        className="w-full px-3 py-2 bg-[#081024] border border-[#78AAFF]/20 rounded-xl text-white focus:outline-none focus:border-[#35E0FF]"
-                      >
-                        <option value="Faculty">Faculty</option>
-                        <option value="Student Co-ordinator">Student Co-ordinator</option>
-                        <option value="Contact Helpline">Contact Helpline</option>
-                      </select>
-                    </div>
+                      <div className="flex-1 space-y-2 w-full">
+                        <label className="block text-[#9DB0D0] font-semibold">
+                          Profile Photo (URL or Upload Image)
+                        </label>
+                        <div className="flex flex-col sm:flex-row items-center gap-2">
+                          <input
+                            type="url"
+                            placeholder="https://example.com/photo.jpg or data URL"
+                            value={newMember.photoUrl}
+                            onChange={(e) => setNewMember({ ...newMember, photoUrl: e.target.value })}
+                            className="flex-1 w-full px-3 py-2 bg-[#0C1630] border border-[#78AAFF]/20 rounded-xl text-white focus:outline-none focus:border-[#35E0FF]"
+                          />
+                          <label className="px-3 py-2 rounded-xl bg-[#132247] hover:bg-[#1a2d5c] text-[#35E0FF] border border-[#35E0FF]/30 cursor-pointer flex items-center gap-1.5 shrink-0 whitespace-nowrap">
+                            <Camera className="w-3.5 h-3.5" />
+                            <span>Upload File</span>
+                            <input
+                              type="file"
+                              accept="image/*"
+                              className="hidden"
+                              onChange={(e) => {
+                                const file = e.target.files?.[0];
+                                if (!file) return;
+                                const reader = new FileReader();
+                                reader.onload = () => {
+                                  if (typeof reader.result === 'string') {
+                                    setNewMember({ ...newMember, photoUrl: reader.result });
+                                  }
+                                };
+                                reader.readAsDataURL(file);
+                              }}
+                            />
+                          </label>
+                          {newMember.photoUrl && (
+                            <button
+                              type="button"
+                              onClick={() => setNewMember({ ...newMember, photoUrl: '' })}
+                              className="px-2.5 py-2 rounded-xl text-rose-400 hover:bg-rose-500/10 border border-rose-400/20 text-xs shrink-0"
+                            >
+                              Clear
+                            </button>
+                          )}
+                        </div>
+                        <span className="text-[10px] text-[#9DB0D0]">
+                          If no photo is provided, the member's 2-letter name initials are displayed automatically.
+                        </span>
+                      </div>
 
-                    <div>
-                      <label className="block text-[#9DB0D0] mb-1">Phone Number (optional)</label>
-                      <input
-                        type="text"
-                        placeholder="e.g. 97409 70278"
-                        value={newMember.phone}
-                        onChange={(e) => setNewMember({ ...newMember, phone: e.target.value })}
-                        className="w-full px-3 py-2 bg-[#081024] border border-[#78AAFF]/20 rounded-xl text-white focus:outline-none focus:border-[#35E0FF]"
-                      />
-                    </div>
-
-                    <div>
-                      <label className="block text-[#9DB0D0] mb-1">Email (optional)</label>
-                      <input
-                        type="email"
-                        placeholder="name@bietdvg.edu"
-                        value={newMember.email}
-                        onChange={(e) => setNewMember({ ...newMember, email: e.target.value })}
-                        className="w-full px-3 py-2 bg-[#081024] border border-[#78AAFF]/20 rounded-xl text-white focus:outline-none focus:border-[#35E0FF]"
-                      />
-                    </div>
-
-                    <div className="flex items-end">
-                      <button
-                        type="submit"
-                        className="w-full py-2.5 rounded-xl font-bold text-white bg-gradient-to-r from-[#FF8A2A] to-[#F5611A]"
-                      >
-                        Add Member
-                      </button>
+                      <div className="shrink-0 w-full sm:w-auto">
+                        <button
+                          type="submit"
+                          className="w-full sm:w-auto px-6 py-2.5 rounded-xl font-bold text-white bg-gradient-to-r from-[#FF8A2A] to-[#F5611A] shadow-md hover:brightness-110 active:scale-95 transition-all cursor-pointer"
+                        >
+                          Add Member
+                        </button>
+                      </div>
                     </div>
                   </form>
                 </div>
 
-                {/* List of members with delete/toggle */}
+                {/* List of members with photo status and editor */}
                 <div className="p-6 rounded-2xl bg-[#0C1630] border border-[#78AAFF]/20">
-                  <h4 className="font-bold text-white text-sm mb-4">Current Committee Members ({coreTeam.length})</h4>
-                  <div className="space-y-2">
-                    {coreTeam.map((m) => (
-                      <div
-                        key={m.id}
-                        className="p-3 rounded-xl bg-[#081024] border border-[#78AAFF]/15 flex items-center justify-between text-xs"
-                      >
-                        <div>
-                          <div className="font-bold text-white flex items-center gap-2">
-                            <span>{m.name}</span>
-                            <span className="text-[10px] font-mono text-[#35E0FF] bg-[#132247] px-1.5 py-0.5 rounded">
-                              {m.category}
-                            </span>
+                  <h4 className="font-bold text-white text-sm mb-4 flex items-center justify-between">
+                    <span>Current Committee Members ({coreTeam.length})</span>
+                    <span className="text-xs text-[#9DB0D0] font-normal">Click "Add/Edit Photo" to update any profile image</span>
+                  </h4>
+
+                  <div className="space-y-2.5">
+                    {coreTeam.map((m) => {
+                      const initials = m.name
+                        ? m.name
+                            .replace(/^(prof\.|dr\.|mr\.|mrs\.|ms\.)\s+/i, '')
+                            .split(/\s+/)
+                            .map((n) => n[0])
+                            .slice(0, 2)
+                            .join('')
+                            .toUpperCase()
+                        : 'TM';
+
+                      return (
+                        <div
+                          key={m.id}
+                          className="p-3.5 rounded-xl bg-[#081024] border border-[#78AAFF]/15 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs hover:border-[#35E0FF]/30 transition-colors"
+                        >
+                          <div className="flex items-center gap-3">
+                            {/* Member Avatar */}
+                            <div className="w-11 h-11 rounded-xl overflow-hidden border border-[#35E0FF]/30 bg-[#0C1630] flex items-center justify-center shrink-0 shadow-sm">
+                              {m.photoUrl ? (
+                                <img src={m.photoUrl} alt={m.name} className="w-full h-full object-cover" />
+                              ) : (
+                                <div className="font-display font-bold text-xs text-[#35E0FF] tracking-wider">
+                                  {initials}
+                                </div>
+                              )}
+                            </div>
+
+                            <div>
+                              <div className="font-bold text-white flex items-center gap-2">
+                                <span>{m.name}</span>
+                                <span className="text-[10px] font-mono text-[#35E0FF] bg-[#132247] px-2 py-0.5 rounded border border-[#35E0FF]/20">
+                                  {m.category}
+                                </span>
+                                {m.photoUrl ? (
+                                  <span className="text-[9px] font-mono text-emerald-400 bg-emerald-500/10 px-1.5 py-0.5 rounded">
+                                    Photo Set
+                                  </span>
+                                ) : (
+                                  <span className="text-[9px] font-mono text-amber-300 bg-amber-500/10 px-1.5 py-0.5 rounded">
+                                    Initials ({initials})
+                                  </span>
+                                )}
+                              </div>
+                              <div className="text-[11px] text-[#9DB0D0] mt-0.5">
+                                {m.role} {m.phone ? `· ${m.phone}` : ''} {m.email ? `· ${m.email}` : ''}
+                              </div>
+                            </div>
                           </div>
-                          <div className="text-[11px] text-[#9DB0D0]">{m.role} {m.phone ? `· ${m.phone}` : ''}</div>
+
+                          <div className="flex items-center gap-2 self-end sm:self-auto shrink-0">
+                            {/* Photo update button */}
+                            <button
+                              onClick={() => {
+                                setEditingPhotoMember(m);
+                                setPhotoModalInput(m.photoUrl || '');
+                              }}
+                              className="px-2.5 py-1 rounded-lg bg-[#132247] hover:bg-[#1a2d5c] text-[#35E0FF] border border-[#35E0FF]/30 text-[11px] font-mono font-semibold flex items-center gap-1 transition-colors"
+                            >
+                              <Camera className="w-3 h-3" />
+                              <span>{m.photoUrl ? 'Change Photo' : 'Add Photo'}</span>
+                            </button>
+
+                            {m.photoUrl && (
+                              <button
+                                onClick={() => updateCoreMember(m.id, { photoUrl: undefined })}
+                                title="Remove photo and fallback to name initials"
+                                className="px-2 py-1 rounded-lg bg-rose-500/10 hover:bg-rose-500/20 text-rose-300 border border-rose-400/20 text-[10px] font-mono transition-colors"
+                              >
+                                Remove
+                              </button>
+                            )}
+
+                            <button
+                              onClick={() => updateCoreMember(m.id, { showPhonePublicly: !m.showPhonePublicly })}
+                              className={`px-2.5 py-1 rounded-lg text-[10px] font-mono font-semibold transition-colors ${
+                                m.showPhonePublicly
+                                  ? 'text-emerald-300 bg-emerald-500/15 border border-emerald-500/30'
+                                  : 'text-[#9DB0D0] bg-[#132247] border border-[#78AAFF]/15'
+                              }`}
+                            >
+                              {m.showPhonePublicly ? 'Phone Public' : 'Phone Hidden'}
+                            </button>
+
+                            <button
+                              onClick={() => deleteCoreMember(m.id)}
+                              className="p-1.5 text-rose-400 hover:text-white hover:bg-rose-500/10 rounded-lg transition-colors"
+                              title="Delete member"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          </div>
                         </div>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* MODAL: Edit Member Photo */}
+                {editingPhotoMember && (
+                  <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md">
+                    <div className="w-full max-w-md bg-[#081024] border border-[#35E0FF]/40 rounded-3xl p-6 shadow-2xl relative animate-in fade-in zoom-in-95">
+                      <button
+                        onClick={() => setEditingPhotoMember(null)}
+                        className="absolute top-4 right-4 text-[#9DB0D0] hover:text-white p-1 rounded-lg bg-[#0C1630] border border-[#78AAFF]/20"
+                      >
+                        <X className="w-4 h-4" />
+                      </button>
+
+                      <div className="flex items-center gap-3 mb-4">
+                        <div className="w-10 h-10 rounded-xl bg-[#35E0FF]/15 text-[#35E0FF] flex items-center justify-center">
+                          <Camera className="w-5 h-5" />
+                        </div>
+                        <div>
+                          <h4 className="font-bold text-white text-base">Edit Committee Member Photo</h4>
+                          <p className="text-xs text-[#9DB0D0]">{editingPhotoMember.name} ({editingPhotoMember.role})</p>
+                        </div>
+                      </div>
+
+                      <div className="my-5 p-4 rounded-2xl bg-[#0C1630] border border-[#78AAFF]/20 flex items-center gap-4">
+                        <div className="w-16 h-16 rounded-2xl overflow-hidden border-2 border-[#35E0FF]/50 bg-[#081024] flex items-center justify-center shrink-0 shadow-lg">
+                          {photoModalInput ? (
+                            <img src={photoModalInput} alt="Preview" className="w-full h-full object-cover" />
+                          ) : (
+                            <div className="font-display font-bold text-lg text-[#35E0FF]">
+                              {editingPhotoMember.name
+                                .replace(/^(prof\.|dr\.|mr\.|mrs\.|ms\.)\s+/i, '')
+                                .split(/\s+/)
+                                .map((n) => n[0])
+                                .slice(0, 2)
+                                .join('')
+                                .toUpperCase()}
+                            </div>
+                          )}
+                        </div>
+                        <div className="text-xs">
+                          <div className="font-semibold text-white">
+                            {photoModalInput ? 'Active Photo Preview' : 'Initials Avatar Active'}
+                          </div>
+                          <p className="text-[11px] text-[#9DB0D0] mt-0.5">
+                            {photoModalInput
+                              ? 'This image will be displayed on the Meet the Core Team section and drawer.'
+                              : 'No photo uploaded. The profile displays the 2-letter initials of the member.'}
+                          </p>
+                        </div>
+                      </div>
+
+                      <div className="space-y-3 text-xs mb-6">
+                        <div>
+                          <label className="block text-[#9DB0D0] mb-1 font-semibold">Image URL</label>
+                          <input
+                            type="url"
+                            value={photoModalInput}
+                            onChange={(e) => setPhotoModalInput(e.target.value)}
+                            placeholder="https://example.com/photo.jpg"
+                            className="w-full px-3 py-2 bg-[#0C1630] border border-[#78AAFF]/20 rounded-xl text-white focus:outline-none focus:border-[#35E0FF]"
+                          />
+                        </div>
+
+                        <div>
+                          <label className="block text-[#9DB0D0] mb-1 font-semibold">Or Upload Local Image</label>
+                          <label className="w-full py-2.5 px-3 rounded-xl bg-[#132247] hover:bg-[#1a2d5c] text-[#35E0FF] border border-[#35E0FF]/30 cursor-pointer flex items-center justify-center gap-2 font-mono">
+                            <UploadCloud className="w-4 h-4" />
+                            <span>Select Photo from Device</span>
+                            <input
+                              type="file"
+                              accept="image/*"
+                              className="hidden"
+                              onChange={(e) => {
+                                const file = e.target.files?.[0];
+                                if (!file) return;
+                                const reader = new FileReader();
+                                reader.onload = () => {
+                                  if (typeof reader.result === 'string') {
+                                    setPhotoModalInput(reader.result);
+                                  }
+                                };
+                                reader.readAsDataURL(file);
+                              }}
+                            />
+                          </label>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center justify-between gap-3 pt-3 border-t border-[#78AAFF]/15">
+                        <button
+                          type="button"
+                          onClick={() => setPhotoModalInput('')}
+                          className="px-3 py-2 rounded-xl text-xs text-rose-300 hover:text-white bg-rose-500/10 border border-rose-400/20"
+                        >
+                          Use Initials
+                        </button>
 
                         <div className="flex items-center gap-2">
                           <button
-                            onClick={() => updateCoreMember(m.id, { showPhonePublicly: !m.showPhonePublicly })}
-                            className={`px-2 py-0.5 rounded text-[10px] font-mono ${
-                              m.showPhonePublicly ? 'text-emerald-300 bg-emerald-500/10' : 'text-[#9DB0D0] bg-[#132247]'
-                            }`}
+                            type="button"
+                            onClick={() => setEditingPhotoMember(null)}
+                            className="px-4 py-2 rounded-xl text-xs text-[#9DB0D0] hover:text-white bg-[#0C1630] border border-[#78AAFF]/20"
                           >
-                            {m.showPhonePublicly ? 'Phone Public' : 'Phone Hidden'}
+                            Cancel
                           </button>
                           <button
-                            onClick={() => deleteCoreMember(m.id)}
-                            className="p-1.5 text-rose-400 hover:text-white"
+                            type="button"
+                            onClick={() => {
+                              updateCoreMember(editingPhotoMember.id, {
+                                photoUrl: photoModalInput.trim() || undefined,
+                              });
+                              setEditingPhotoMember(null);
+                            }}
+                            className="px-5 py-2 rounded-xl text-xs font-bold text-white bg-gradient-to-r from-[#0052FF] to-[#35E0FF] hover:brightness-110 shadow-md"
                           >
-                            <Trash2 className="w-4 h-4" />
+                            Save Photo
                           </button>
                         </div>
                       </div>
-                    ))}
+                    </div>
                   </div>
-                </div>
+                )}
               </div>
             )}
 

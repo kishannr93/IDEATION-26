@@ -13,6 +13,7 @@ export interface ProjectSubmission {
   submitted?: boolean;
   submittedAt: string;
   updatedAt?: string;
+  submissionCount?: number; // 1 or 2 (maximum 2 submission attempts allowed)
   projectTitle: string;
   projectTrack: string;
   problemStatement?: string;
@@ -119,6 +120,7 @@ export interface CoreTeamMember {
   email?: string;
   showPhonePublicly: boolean;
   order: number;
+  photoUrl?: string; // photo URL or base64 data image
 }
 
 export interface RuleItem {
@@ -151,6 +153,7 @@ export interface EventConfig {
   collegeName: string;
   clubName: string;
   registrationOpen: boolean;
+  pptSubmissionsOpen?: boolean; // Admin toggle to stop / resume PPT submissions
   registrationDeadline: string;
   maxTeamsLimit: number;
   upiId: string;
