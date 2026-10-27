@@ -12,7 +12,7 @@ export const HeroSection: React.FC<HeroSectionProps> = ({ onOpenQR }) => {
   const { eventConfig, setShowRegisterModal, registeredTeams } = useHackathon();
   const [downloadingPpt, setDownloadingPpt] = useState(false);
 
-  // Countdown timer to 18 November 2026
+  // Dynamic Countdown timer tracking structured metadata startDate (December 1, 2026)
   const [timeLeft, setTimeLeft] = useState({
     days: 0,
     hours: 0,
@@ -20,16 +20,65 @@ export const HeroSection: React.FC<HeroSectionProps> = ({ onOpenQR }) => {
     seconds: 0,
   });
 
+  const [targetDateLabel, setTargetDateLabel] = useState<string>('December 1, 2026');
+  const [isHackathonLive, setIsHackathonLive] = useState<boolean>(false);
+
+  // Helper to extract the event startDate directly from the structured metadata (<script type="application/ld+json">)
+  const getEventStartDateFromMetadata = (): { targetTime: number; formattedDate: string } => {
+    let dateStr: string | null = null;
+    if (typeof document !== 'undefined') {
+      try {
+        const metadataScript =
+          document.getElementById('structured-event-metadata') ||
+          document.querySelector('script[type="application/ld+json"]');
+        if (metadataScript && metadataScript.textContent) {
+          const parsed = JSON.parse(metadataScript.textContent);
+          if (parsed && typeof parsed === 'object') {
+            if (parsed.startDate) {
+              dateStr = parsed.startDate;
+            } else if (Array.isArray(parsed['@graph'])) {
+              const eventNode = parsed['@graph'].find((item: any) => item.startDate);
+              if (eventNode?.startDate) dateStr = eventNode.startDate;
+            }
+          }
+        }
+      } catch (err) {
+        console.warn('Could not parse structured metadata for countdown start date:', err);
+      }
+    }
+
+    if (!dateStr && eventConfig?.dateStart) {
+      dateStr = eventConfig.dateStart;
+    }
+    if (!dateStr) {
+      dateStr = '2026-12-01T09:00:00+05:30';
+    }
+
+    const parsedDate = new Date(dateStr);
+    const validDate = isNaN(parsedDate.getTime()) ? new Date('2026-12-01T09:00:00+05:30') : parsedDate;
+    const formatted = validDate.toLocaleDateString('en-US', {
+      month: 'long',
+      day: 'numeric',
+      year: 'numeric',
+    });
+
+    return {
+      targetTime: validDate.getTime(),
+      formattedDate: formatted || 'December 1, 2026',
+    };
+  };
+
   const handleDownloadTemplate = async () => {
     try {
       setDownloadingPpt(true);
       await generatePptTemplate({
         teamName: 'Official IDEATION Team',
         teamId: 'IDN-SAMPLE',
+        leaderName: 'Team Leader',
         track: 'Artificial Intelligence & Smart Systems',
         college: 'Bapuji Institute of Engineering and Technology (BIET)',
-        problemTitle: 'Standard 10-Slide Project Presentation',
-        problemSummary: 'Official deck template with guidelines, architecture diagrams, tech stack, and impact roadmap.',
+        problemTitle: 'Official 8-Slide Pitch Deck Presentation Template',
+        problemSummary: 'Official 8-slide template with Problem Statement, Proposed Solution, Technical Approach, Feasibility, Demo Plan, Architecture Canvas, and Submission Checklist.',
       });
     } catch (err) {
       console.error('Error downloading template:', err);
@@ -39,11 +88,12 @@ export const HeroSection: React.FC<HeroSectionProps> = ({ onOpenQR }) => {
   };
 
   useEffect(() => {
-    const targetDate = new Date('2026-11-18T09:00:00+05:30').getTime();
+    const { targetTime, formattedDate } = getEventStartDateFromMetadata();
+    setTargetDateLabel(formattedDate);
 
     const updateCountdown = () => {
       const now = new Date().getTime();
-      const difference = targetDate - now;
+      const difference = targetTime - now;
 
       if (difference > 0) {
         setTimeLeft({
@@ -52,15 +102,17 @@ export const HeroSection: React.FC<HeroSectionProps> = ({ onOpenQR }) => {
           minutes: Math.floor((difference % (1000 * 60 * 60)) / (1000 * 60)),
           seconds: Math.floor((difference % (1000 * 60)) / 1000),
         });
+        setIsHackathonLive(false);
       } else {
         setTimeLeft({ days: 0, hours: 0, minutes: 0, seconds: 0 });
+        setIsHackathonLive(true);
       }
     };
 
     updateCountdown();
     const interval = setInterval(updateCountdown, 1000);
     return () => clearInterval(interval);
-  }, []);
+  }, [eventConfig?.dateStart]);
 
   return (
     <section id="hero" className="relative min-h-[92vh] flex items-center justify-center overflow-hidden pt-8 pb-16 px-4 sm:px-6 lg:px-8 bg-circuit-grid">
@@ -142,13 +194,19 @@ export const HeroSection: React.FC<HeroSectionProps> = ({ onOpenQR }) => {
               <div className="flex items-center gap-2">
                 <Clock className="w-4 h-4 text-[#35E0FF]" />
                 <span className="font-tech text-xs tracking-wider uppercase font-bold text-[#35E0FF]">
-                  Countdown to Hackathon Launch
+                  Countdown to Hackathon Launch · {targetDateLabel}
                 </span>
               </div>
               {/* Looping 24:00:00 Ticker */}
-              <div className="flex items-center gap-2 font-mono text-xs text-emerald-400 bg-emerald-950/40 border border-emerald-500/30 px-2 py-0.5 rounded">
-                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-                <span>FORMAT: 24:00:00 SPRINT</span>
+              <div className={`flex items-center gap-2 font-mono text-xs px-2 py-0.5 rounded border ${
+                isHackathonLive 
+                  ? 'text-amber-300 bg-amber-950/40 border-amber-500/30' 
+                  : 'text-emerald-400 bg-emerald-950/40 border-emerald-500/30'
+              }`}>
+                <span className={`w-1.5 h-1.5 rounded-full animate-pulse ${
+                  isHackathonLive ? 'bg-amber-400' : 'bg-emerald-400'
+                }`} />
+                <span>{isHackathonLive ? 'HACKATHON IS LIVE!' : 'FORMAT: 24:00:00 SPRINT'}</span>
               </div>
             </div>
 
@@ -204,7 +262,7 @@ export const HeroSection: React.FC<HeroSectionProps> = ({ onOpenQR }) => {
               onClick={handleDownloadTemplate}
               disabled={downloadingPpt}
               className="px-4 py-3.5 rounded-xl text-xs font-semibold text-[#35E0FF] bg-[#35E0FF]/10 hover:bg-[#35E0FF]/20 border border-[#35E0FF]/40 transition-all flex items-center gap-1.5 cursor-pointer shadow-sm"
-              title="Download standard 10-slide PowerPoint presentation template"
+              title="Download official 8-slide PowerPoint presentation template"
             >
               <Download className={`w-4 h-4 ${downloadingPpt ? 'animate-bounce' : ''}`} />
               <span>{downloadingPpt ? 'Generating...' : 'PPT Template (.pptx)'}</span>

@@ -550,10 +550,11 @@ export const AdminPanel: React.FC = () => {
       await generatePptTemplate({
         teamName: 'Official BIET Template',
         teamId: 'IDN-SAMPLE',
+        leaderName: 'Team Leader',
         track: 'All Tracks',
         college: 'Bapuji Institute of Engineering and Technology (BIET)',
-        problemTitle: 'Standard 10-Slide Project Presentation',
-        problemSummary: 'Official deck template with guidelines, architecture diagrams, tech stack, and impact roadmap.',
+        problemTitle: 'Official 8-Slide Pitch Deck Presentation Template',
+        problemSummary: 'Official 8-slide template with Problem Statement, Proposed Solution, Technical Approach, Feasibility, Demo Plan, Architecture Canvas, and Submission Checklist.',
       });
     } catch (err) {
       console.error('Error generating template:', err);

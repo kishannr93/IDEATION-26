@@ -156,7 +156,23 @@ const HackathonContext = createContext<HackathonContextType | undefined>(undefin
 export const HackathonProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [eventConfig, setEventConfig] = useState<EventConfig>(() => {
     const saved = localStorage.getItem('ideation_event_config');
-    return saved ? JSON.parse(saved) : initialEventConfig;
+    if (saved) {
+      try {
+        const parsed = JSON.parse(saved);
+        if (parsed.dateStart && parsed.dateStart.includes('2026-11')) {
+          return {
+            ...parsed,
+            dates: '1 & 2 December 2026',
+            dateStart: '2026-12-01T09:00:00+05:30',
+            dateEnd: '2026-12-02T10:00:00+05:30',
+          };
+        }
+        return parsed;
+      } catch {
+        return initialEventConfig;
+      }
+    }
+    return initialEventConfig;
   });
 
   const [tracks, setTracks] = useState<DomainTrack[]>(() => {

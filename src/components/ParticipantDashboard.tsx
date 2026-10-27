@@ -162,10 +162,12 @@ export const ParticipantDashboard: React.FC = () => {
       await generatePptTemplate({
         teamName: currentTeamSession?.teamName || 'IDEATION 2026 Team',
         teamId: currentTeamSession?.id || 'IDN-SAMPLE',
+        leaderName: currentTeamSession?.members?.find(m => m.isLeader)?.name || currentTeamSession?.members?.[0]?.name,
         track: currentTeamSession?.primaryTrack || 'Artificial Intelligence & Smart Systems',
         college: currentTeamSession?.college || 'Bapuji Institute of Engineering and Technology (BIET)',
         problemTitle: currentTeamSession?.ideaTitle || 'Project Title / Working Prototype',
         problemSummary: currentTeamSession?.ideaSummary || 'Enter your project problem statement, proposed architecture, and impact.',
+        members: currentTeamSession?.members,
       });
     } catch (err) {
       console.error('PPT generation error:', err);
@@ -276,7 +278,7 @@ export const ParticipantDashboard: React.FC = () => {
               onClick={handleDownloadPptTemplate}
               disabled={isDownloadingTemplate}
               className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold text-[#35E0FF] bg-[#35E0FF]/10 border border-[#35E0FF]/30 hover:bg-[#35E0FF]/20 transition-all cursor-pointer shadow-[0_0_15px_rgba(53,224,255,0.15)] disabled:opacity-50"
-              title="Download standard 10-slide PowerPoint presentation template"
+              title="Download official 8-slide PowerPoint presentation template"
             >
               <Download className={`w-3.5 h-3.5 ${isDownloadingTemplate ? 'animate-bounce' : ''}`} />
               <span>{isDownloadingTemplate ? 'Generating PPT...' : 'Download PPT Template (.pptx)'}</span>
@@ -388,7 +390,7 @@ export const ParticipantDashboard: React.FC = () => {
                   <span className="text-xs font-bold font-mono">Official PPT Template Available</span>
                 </div>
                 <p className="text-[11px] text-[#9DB0D0] leading-relaxed mb-3">
-                  Prepare your presentation using BIET's standardized 10-slide deck with guidelines for problem statement, architecture, tech stack & demo.
+                  Prepare your presentation using BIET's official 8-slide deck matching the required submission guidelines and format.
                 </p>
                 <div className="flex items-center gap-2">
                   <button
@@ -1252,7 +1254,7 @@ export const ParticipantDashboard: React.FC = () => {
                   Official BIET Presentation Structure
                 </span>
                 <h3 className="text-xl font-bold font-display text-white">
-                  10-Slide Template Guidelines
+                  8-Slide Official Template Guidelines
                 </h3>
               </div>
             </div>
