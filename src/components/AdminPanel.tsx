@@ -68,6 +68,7 @@ export const AdminPanel: React.FC = () => {
     exportTeamsToSQL,
     resetAllData,
     setActiveView,
+    navigateTo,
     schedule,
     addScheduleEvent,
     updateScheduleEvent,
@@ -186,6 +187,8 @@ export const AdminPanel: React.FC = () => {
     category: 'Update' as Announcement['category'],
     pinned: false,
     author: 'Anveshan Core Team',
+    link: '',
+    linkText: '',
   });
 
   // Check-in input
@@ -471,13 +474,23 @@ export const AdminPanel: React.FC = () => {
   const handleAddNews = (e: React.FormEvent) => {
     e.preventDefault();
     if (!newNews.title || !newNews.content) return;
-    addAnnouncement(newNews);
+    addAnnouncement({
+      title: newNews.title,
+      content: newNews.content,
+      category: newNews.category,
+      pinned: newNews.pinned,
+      author: newNews.author,
+      link: newNews.link?.trim() || undefined,
+      linkText: newNews.linkText?.trim() || undefined,
+    });
     setNewNews({
       title: '',
       content: '',
       category: 'Update',
       pinned: false,
       author: 'Anveshan Core Team',
+      link: '',
+      linkText: '',
     });
   };
 
@@ -592,8 +605,8 @@ export const AdminPanel: React.FC = () => {
 
           <div className="flex items-center gap-3">
             <button
-              onClick={() => setActiveView('home')}
-              className="flex items-center gap-1.5 px-3 py-2 text-xs font-semibold text-[#9DB0D0] hover:text-white bg-[#0C1630] border border-[#78AAFF]/20 rounded-xl transition-colors"
+              onClick={() => navigateTo('home')}
+              className="flex items-center gap-1.5 px-3 py-2 text-xs font-semibold text-[#9DB0D0] hover:text-white bg-[#0C1630] border border-[#78AAFF]/20 rounded-xl transition-colors cursor-pointer"
             >
               <ArrowLeft className="w-4 h-4" />
               <span>Back to Portal</span>
@@ -1882,6 +1895,29 @@ export const AdminPanel: React.FC = () => {
                       />
                     </div>
 
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
+                      <div>
+                        <label className="block text-[#9DB0D0] mb-1">Attached Resource Link (optional)</label>
+                        <input
+                          type="url"
+                          placeholder="https://drive.google.com/... or https://..."
+                          value={newNews.link}
+                          onChange={(e) => setNewNews({ ...newNews, link: e.target.value })}
+                          className="w-full px-3 py-2 bg-[#081024] border border-[#78AAFF]/20 rounded-xl text-white focus:outline-none focus:border-[#35E0FF]"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-[#9DB0D0] mb-1">Link Button Label (optional)</label>
+                        <input
+                          type="text"
+                          placeholder="e.g. Download Rulebook / Open Document"
+                          value={newNews.linkText}
+                          onChange={(e) => setNewNews({ ...newNews, linkText: e.target.value })}
+                          className="w-full px-3 py-2 bg-[#081024] border border-[#78AAFF]/20 rounded-xl text-white focus:outline-none focus:border-[#35E0FF]"
+                        />
+                      </div>
+                    </div>
+
                     <div className="flex items-center justify-between">
                       <label className="flex items-center gap-2 cursor-pointer text-[#9DB0D0]">
                         <input
@@ -2041,6 +2077,95 @@ export const AdminPanel: React.FC = () => {
                     </div>
 
                     <span className="text-[11px] font-mono text-emerald-400">All edits sync live across site</span>
+                  </div>
+                </div>
+
+                {/* Dynamic Links & External Resources Card */}
+                <div className="p-6 rounded-2xl bg-[#0C1630] border border-[#78AAFF]/20 space-y-4">
+                  <div className="flex items-center justify-between pb-3 border-b border-[#78AAFF]/15">
+                    <div>
+                      <h3 className="font-display font-bold text-base text-white flex items-center gap-2">
+                        <Globe className="w-4 h-4 text-[#35E0FF]" />
+                        <span>Live Dynamic Links & External Resources</span>
+                      </h3>
+                      <p className="text-xs text-[#9DB0D0] mt-0.5">
+                        These links synchronize automatically in real-time across the navbar, hero, participants, and footer.
+                      </p>
+                    </div>
+                    <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-emerald-500/15 text-emerald-400 border border-emerald-500/30">
+                      Live Cloud Sync
+                    </span>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs">
+                    <div>
+                      <label className="block text-[#9DB0D0] mb-1 font-semibold">Official Presentation Template Link</label>
+                      <input
+                        type="url"
+                        placeholder="e.g. https://docs.google.com/presentation/... (or leave blank for built-in PPT)"
+                        value={eventConfig.officialPptLink || ''}
+                        onChange={(e) => updateEventConfig({ officialPptLink: e.target.value })}
+                        className="w-full px-3 py-2 bg-[#081024] border border-[#78AAFF]/20 rounded-xl text-white focus:outline-none focus:border-[#35E0FF]"
+                      />
+                      <span className="text-[10px] text-[#9DB0D0]/70 mt-1 block">
+                        If left blank, participants download the official 8-slide PPTX generated directly in their browser.
+                      </span>
+                    </div>
+
+                    <div>
+                      <label className="block text-[#9DB0D0] mb-1 font-semibold">Problem Statements Repository Link</label>
+                      <input
+                        type="url"
+                        placeholder="https://drive.google.com/... or official PDF link"
+                        value={eventConfig.problemStatementsLink || ''}
+                        onChange={(e) => updateEventConfig({ problemStatementsLink: e.target.value })}
+                        className="w-full px-3 py-2 bg-[#081024] border border-[#78AAFF]/20 rounded-xl text-white focus:outline-none focus:border-[#35E0FF]"
+                      />
+                      <span className="text-[10px] text-[#9DB0D0]/70 mt-1 block">
+                        Shared link for detailed problem statement descriptions and guidelines.
+                      </span>
+                    </div>
+
+                    <div>
+                      <label className="block text-[#9DB0D0] mb-1 font-semibold">WhatsApp Participant Group Link</label>
+                      <input
+                        type="url"
+                        placeholder="https://chat.whatsapp.com/..."
+                        value={eventConfig.whatsappGroupLink || ''}
+                        onChange={(e) => updateEventConfig({ whatsappGroupLink: e.target.value })}
+                        className="w-full px-3 py-2 bg-[#081024] border border-[#78AAFF]/20 rounded-xl text-white focus:outline-none focus:border-[#35E0FF]"
+                      />
+                      <span className="text-[10px] text-[#9DB0D0]/70 mt-1 block">
+                        Live invite link for team leader community broadcast announcements.
+                      </span>
+                    </div>
+
+                    <div>
+                      <label className="block text-[#9DB0D0] mb-1 font-semibold">Official Rulebook & Brochure PDF Link</label>
+                      <input
+                        type="url"
+                        placeholder="https://... / brochure link"
+                        value={eventConfig.brochurePdfLink || ''}
+                        onChange={(e) => updateEventConfig({ brochurePdfLink: e.target.value })}
+                        className="w-full px-3 py-2 bg-[#081024] border border-[#78AAFF]/20 rounded-xl text-white focus:outline-none focus:border-[#35E0FF]"
+                      />
+                      <span className="text-[10px] text-[#9DB0D0]/70 mt-1 block">
+                        Direct download or viewer link for the complete rulebook brochure.
+                      </span>
+                    </div>
+
+                    <div className="sm:col-span-2">
+                      <label className="block text-[#9DB0D0] mb-1 font-semibold">Campus Venue Address & Maps Destination</label>
+                      <input
+                        type="text"
+                        value={eventConfig.locationAddress || '325, Shamanur Rd, BIET, Davangere, Karnataka 577004'}
+                        onChange={(e) => updateEventConfig({ locationAddress: e.target.value })}
+                        className="w-full px-3 py-2 bg-[#081024] border border-[#78AAFF]/20 rounded-xl text-white focus:outline-none focus:border-[#35E0FF]"
+                      />
+                      <span className="text-[10px] text-[#9DB0D0]/70 mt-1 block">
+                        Controls the venue address and map query parameters across the entire website.
+                      </span>
+                    </div>
                   </div>
                 </div>
               </div>

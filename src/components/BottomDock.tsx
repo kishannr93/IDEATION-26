@@ -20,7 +20,7 @@ export const BottomDock: React.FC = () => {
   const {
     announcements,
     activeView,
-    setActiveView,
+    navigateTo,
     setShowRegisterModal,
     showCoreTeamPanel,
     setShowCoreTeamPanel,
@@ -35,7 +35,7 @@ export const BottomDock: React.FC = () => {
     if (activeView !== 'home') return;
 
     const handleScroll = () => {
-      const sections = ['hero', 'tracks', 'prizes', 'schedule', 'rules', 'news', 'core-team', 'contact'];
+      const sections = ['hero', 'tracks', 'prizes', 'schedule', 'rules', 'news', 'location', 'core-team', 'contact'];
       const scrollY = window.scrollY + 200;
 
       for (const sectionId of sections) {
@@ -56,16 +56,7 @@ export const BottomDock: React.FC = () => {
   }, [activeView]);
 
   const scrollToSection = (id: string) => {
-    if (activeView !== 'home') {
-      setActiveView('home');
-      setTimeout(() => {
-        const el = document.getElementById(id);
-        if (el) el.scrollIntoView({ behavior: 'smooth' });
-      }, 100);
-    } else {
-      const el = document.getElementById(id);
-      if (el) el.scrollIntoView({ behavior: 'smooth' });
-    }
+    navigateTo('home', id);
   };
 
   const unreadNewsCount = announcements.length;
@@ -226,8 +217,8 @@ export const BottomDock: React.FC = () => {
 
             {/* Admin Console */}
             <button
-              onClick={() => setActiveView(activeView === 'admin' ? 'home' : 'admin')}
-              className={`group relative p-2.5 rounded-xl transition-all ${
+              onClick={() => navigateTo(activeView === 'admin' ? 'home' : 'admin')}
+              className={`group relative p-2.5 rounded-xl transition-all cursor-pointer ${
                 activeView === 'admin'
                   ? 'bg-[#FF8A2A]/20 text-[#FF8A2A] shadow-[0_0_12px_rgba(255,138,42,0.4)]'
                   : 'text-[#9DB0D0] hover:text-[#FF8A2A] hover:bg-[#132247]/60'
@@ -337,15 +328,15 @@ export const BottomDock: React.FC = () => {
                 <span>Helpline Numbers</span>
               </button>
               <button
-                onClick={() => { setActiveView('dashboard'); setMobileMoreOpen(false); }}
-                className="col-span-2 flex items-center justify-between p-3 bg-[#081024] border border-[#35E0FF]/30 rounded-xl text-left text-[#35E0FF] font-semibold"
+                onClick={() => { navigateTo('dashboard'); setMobileMoreOpen(false); }}
+                className="col-span-2 flex items-center justify-between p-3 bg-[#081024] border border-[#35E0FF]/30 rounded-xl text-left text-[#35E0FF] font-semibold cursor-pointer"
               >
                 <span>Participant Dashboard & Pass</span>
                 <span className="text-xs bg-[#35E0FF]/20 px-2 py-0.5 rounded text-[#35E0FF]">Login</span>
               </button>
               <button
-                onClick={() => { setActiveView('admin'); setMobileMoreOpen(false); }}
-                className="col-span-2 flex items-center justify-between p-3 bg-[#081024] border border-[#FF8A2A]/30 rounded-xl text-left text-[#FF8A2A] font-semibold"
+                onClick={() => { navigateTo('admin'); setMobileMoreOpen(false); }}
+                className="col-span-2 flex items-center justify-between p-3 bg-[#081024] border border-[#FF8A2A]/30 rounded-xl text-left text-[#FF8A2A] font-semibold cursor-pointer"
               >
                 <span>Admin CMS Console</span>
                 <ShieldCheck className="w-4 h-4" />

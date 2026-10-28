@@ -46,6 +46,7 @@ export const ParticipantDashboard: React.FC = () => {
     setCurrentTeamSession,
     updateTeam,
     setActiveView,
+    navigateTo,
     setShowRegisterModal,
     submitProjectPresentation,
     announcements,
@@ -157,6 +158,10 @@ export const ParticipantDashboard: React.FC = () => {
 
   // Download PPT template
   const handleDownloadPptTemplate = async () => {
+    if (eventConfig?.officialPptLink) {
+      window.open(eventConfig.officialPptLink, '_blank', 'noopener,noreferrer');
+      return;
+    }
     try {
       setIsDownloadingTemplate(true);
       await generatePptTemplate({
@@ -265,7 +270,7 @@ export const ParticipantDashboard: React.FC = () => {
         {/* Top bar back button & actions */}
         <div className="flex flex-wrap items-center justify-between gap-3 mb-8">
           <button
-            onClick={() => setActiveView('home')}
+            onClick={() => navigateTo('home')}
             className="flex items-center gap-2 text-xs font-semibold text-[#9DB0D0] hover:text-[#35E0FF] transition-colors cursor-pointer"
           >
             <ArrowLeft className="w-4 h-4" />

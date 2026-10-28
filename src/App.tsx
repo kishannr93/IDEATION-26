@@ -34,20 +34,44 @@ const HackathonApp: React.FC = () => {
   const [qrModalOpen, setQrModalOpen] = useState(false);
   const [legalModalType, setLegalModalType] = useState<'terms' | 'privacy' | null>(null);
 
-  // Check URL parameters on mount (e.g. ?action=register or ?view=admin)
+  // Check URL parameters & hash on mount and when changed
   useEffect(() => {
-    if (typeof window !== 'undefined') {
+    const handleUrlSync = () => {
+      if (typeof window === 'undefined') return;
       const params = new URLSearchParams(window.location.search);
-      if (params.get('action') === 'register') {
+      const view = params.get('view');
+      const action = params.get('action');
+      const hash = window.location.hash.replace('#', '');
+
+      if (action === 'register') {
         setShowRegisterModal(true);
       }
-      if (params.get('view') === 'admin') {
+      if (view === 'admin') {
         setActiveView('admin');
+        return;
       }
-      if (params.get('view') === 'dashboard') {
+      if (view === 'dashboard') {
         setActiveView('dashboard');
+        return;
       }
-    }
+
+      if (hash) {
+        setActiveView('home');
+        setTimeout(() => {
+          const el = document.getElementById(hash);
+          if (el) el.scrollIntoView({ behavior: 'smooth' });
+        }, 120);
+      }
+    };
+
+    window.addEventListener('hashchange', handleUrlSync);
+    window.addEventListener('popstate', handleUrlSync);
+    handleUrlSync();
+
+    return () => {
+      window.removeEventListener('hashchange', handleUrlSync);
+      window.removeEventListener('popstate', handleUrlSync);
+    };
   }, [setActiveView, setShowRegisterModal]);
 
   return (

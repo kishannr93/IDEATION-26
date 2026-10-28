@@ -109,6 +109,8 @@ export interface Announcement {
   pinned: boolean;
   date: string;
   author: string;
+  link?: string;
+  linkText?: string;
 }
 
 export interface CoreTeamMember {
@@ -158,4 +160,12 @@ export interface EventConfig {
   maxTeamsLimit: number;
   upiId: string;
   upiPayeeName: string;
+  officialPptLink?: string;
+  problemStatementsLink?: string;
+  whatsappGroupLink?: string;
+  brochurePdfLink?: string;
+  discordUrl?: string;
+  locationAddress?: string;
+  locationMapsUrl?: string;
+  updatedAt?: string;
 }

@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { useHackathon } from '../context/HackathonContext';
-import { Bell, Search, Pin, Calendar, Tag, AlertTriangle, Megaphone } from 'lucide-react';
+import { Bell, Search, Pin, Calendar, Tag, AlertTriangle, Megaphone, ExternalLink } from 'lucide-react';
 
 export const NewsSection: React.FC = () => {
   const { announcements } = useHackathon();
@@ -130,6 +130,20 @@ export const NewsSection: React.FC = () => {
                 <p className="text-xs sm:text-sm text-[#9DB0D0] mt-2 leading-relaxed">
                   {item.content}
                 </p>
+
+                {item.link && (
+                  <div className="mt-3 pt-3 border-t border-[#78AAFF]/15 flex items-center justify-between">
+                    <a
+                      href={item.link}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold text-[#35E0FF] bg-[#35E0FF]/10 hover:bg-[#35E0FF]/20 border border-[#35E0FF]/30 transition-all cursor-pointer shadow-sm"
+                    >
+                      <span>{item.linkText || 'Open Attached Resource'}</span>
+                      <ExternalLink className="w-3.5 h-3.5" />
+                    </a>
+                  </div>
+                )}
               </div>
             ))
           )}

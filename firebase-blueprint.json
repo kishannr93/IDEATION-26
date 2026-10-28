@@ -27,12 +27,80 @@
         "members": { "type": "string", "description": "JSON serialized team members list" }
       },
       "required": ["id", "teamName", "college", "primaryTrack", "paymentStatus", "registeredAt", "leaderEmail"]
+    },
+    "SiteConfig": {
+      "title": "Site Configuration",
+      "description": "Global hackathon event configuration, link URLs, dates, and live toggles.",
+      "type": "object",
+      "properties": {
+        "eventName": { "type": "string" },
+        "tagline": { "type": "string" },
+        "dates": { "type": "string" },
+        "dateStart": { "type": "string" },
+        "dateEnd": { "type": "string" },
+        "venue": { "type": "string" },
+        "entryFee": { "type": "number" },
+        "prizePoolAmount": { "type": "number" },
+        "registrationOpen": { "type": "boolean" },
+        "pptSubmissionsOpen": { "type": "boolean" },
+        "upiId": { "type": "string" },
+        "officialPptLink": { "type": "string" },
+        "problemStatementsLink": { "type": "string" },
+        "whatsappGroupLink": { "type": "string" },
+        "brochurePdfLink": { "type": "string" },
+        "updatedAt": { "type": "string" }
+      }
+    },
+    "Announcement": {
+      "title": "Announcement & News",
+      "description": "Live announcement updates, notices, and links.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "title": { "type": "string" },
+        "content": { "type": "string" },
+        "category": { "type": "string" },
+        "pinned": { "type": "boolean" },
+        "date": { "type": "string" },
+        "author": { "type": "string" },
+        "link": { "type": "string" }
+      },
+      "required": ["id", "title", "content"]
+    },
+    "CoreTeamMember": {
+      "title": "Core Team Member",
+      "description": "Organizing committee member information, photos, roles, and contacts.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "role": { "type": "string" },
+        "category": { "type": "string" },
+        "phone": { "type": "string" },
+        "email": { "type": "string" },
+        "showPhonePublicly": { "type": "boolean" },
+        "order": { "type": "number" },
+        "photoUrl": { "type": "string" }
+      },
+      "required": ["id", "name", "role", "category"]
     }
   },
   "firestore": {
     "/teams/{teamId}": {
       "schema": "Team",
       "description": "Collection of all registered teams accessible across laptops, mobiles, and online platforms"
+    },
+    "/site_config/{configId}": {
+      "schema": "SiteConfig",
+      "description": "Centralized event configuration and live dynamic links"
+    },
+    "/announcements/{announcementId}": {
+      "schema": "Announcement",
+      "description": "Real-time news alerts, announcements, and resource links"
+    },
+    "/core_team/{memberId}": {
+      "schema": "CoreTeamMember",
+      "description": "Live committee list, photos, and roles"
     }
   }
 }

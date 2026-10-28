@@ -12,6 +12,7 @@ import {
   collection,
   doc,
   setDoc,
+  deleteDoc,
   getDocs,
   onSnapshot,
   updateDoc,
@@ -21,7 +22,34 @@ import {
   Unsubscribe,
 } from 'firebase/firestore';
 import firebaseConfig from '../../firebase-applet-config.json';
-import { RegisteredTeam, ProjectSubmission } from '../types';
+import { RegisteredTeam, ProjectSubmission, EventConfig, Announcement, CoreTeamMember } from '../types';
+
+export enum OperationType {
+  CREATE = 'create',
+  UPDATE = 'update',
+  DELETE = 'delete',
+  LIST = 'list',
+  GET = 'get',
+  WRITE = 'write',
+}
+
+export interface FirestoreErrorContext {
+  operation: OperationType;
+  path: string;
+  [key: string]: any;
+}
+
+export class FirestorePermissionError extends Error {
+  constructor(public context: FirestoreErrorContext, originalError?: any) {
+    super(`Firestore permission error on ${context.operation} at ${context.path}: ${originalError?.message || 'Access denied'}`);
+    this.name = 'FirestorePermissionError';
+  }
+}
+
+export function handleFirestoreError(error: unknown, context: FirestoreErrorContext): never {
+  console.error('[Firestore Error]', context, error);
+  throw new FirestorePermissionError(context, error);
+}
 
 // Initialize Firebase App instance
 const app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApp();
@@ -296,3 +324,153 @@ export function subscribeFirestoreTeams(
     }
   );
 }
+
+// -----------------------------------------------------------------------------
+// FIRESTORE LIVE REAL-TIME SYNC FOR SITE CONFIG & LINKS
+// -----------------------------------------------------------------------------
+
+export async function saveSiteConfigToFirestore(config: Partial<EventConfig>): Promise<void> {
+  const path = 'site_config/event_config';
+  try {
+    const configRef = doc(db, 'site_config', 'event_config');
+    await setDoc(
+      configRef,
+      {
+        ...config,
+        updatedAt: new Date().toISOString(),
+      },
+      { merge: true }
+    );
+  } catch (error) {
+    console.warn('Firestore save site config warning:', error);
+  }
+}
+
+export function subscribeFirestoreSiteConfig(
+  callback: (config: Partial<EventConfig>) => void
+): Unsubscribe {
+  const configRef = doc(db, 'site_config', 'event_config');
+  return onSnapshot(
+    configRef,
+    (docSnap) => {
+      if (docSnap.exists()) {
+        callback(docSnap.data() as Partial<EventConfig>);
+      }
+    },
+    (err) => {
+      console.warn('Firestore site config snapshot warning:', err);
+    }
+  );
+}
+
+// -----------------------------------------------------------------------------
+// FIRESTORE LIVE REAL-TIME SYNC FOR ANNOUNCEMENTS & NEWS LINKS
+// -----------------------------------------------------------------------------
+
+export async function saveAnnouncementToFirestore(announcement: Announcement): Promise<void> {
+  try {
+    const docRef = doc(db, 'announcements', announcement.id);
+    await setDoc(docRef, announcement, { merge: true });
+  } catch (error) {
+    console.warn('Firestore save announcement warning:', error);
+  }
+}
+
+export async function deleteAnnouncementFromFirestore(id: string): Promise<void> {
+  try {
+    const docRef = doc(db, 'announcements', id);
+    await deleteDoc(docRef);
+  } catch (error) {
+    console.warn('Firestore delete announcement warning:', error);
+  }
+}
+
+export function subscribeFirestoreAnnouncements(
+  callback: (announcements: Announcement[]) => void
+): Unsubscribe {
+  const colRef = collection(db, 'announcements');
+  return onSnapshot(
+    colRef,
+    (snapshot) => {
+      const items: Announcement[] = [];
+      snapshot.forEach((docSnap) => {
+        const d = docSnap.data();
+        items.push({
+          id: d.id || docSnap.id,
+          title: d.title || '',
+          content: d.content || '',
+          category: d.category || 'Update',
+          pinned: Boolean(d.pinned),
+          date: d.date || new Date().toISOString(),
+          author: d.author || 'Anveshan Core Team',
+          link: d.link || undefined,
+          linkText: d.linkText || undefined,
+        });
+      });
+      // Sort pinned first, then newest date
+      items.sort((a, b) => {
+        if (a.pinned && !b.pinned) return -1;
+        if (!a.pinned && b.pinned) return 1;
+        return new Date(b.date).getTime() - new Date(a.date).getTime();
+      });
+      callback(items);
+    },
+    (err) => {
+      console.warn('Firestore announcements snapshot warning:', err);
+    }
+  );
+}
+
+// -----------------------------------------------------------------------------
+// FIRESTORE LIVE REAL-TIME SYNC FOR CORE TEAM MEMBERS
+// -----------------------------------------------------------------------------
+
+export async function saveCoreMemberToFirestore(member: CoreTeamMember): Promise<void> {
+  try {
+    const docRef = doc(db, 'core_team', member.id);
+    await setDoc(docRef, member, { merge: true });
+  } catch (error) {
+    console.warn('Firestore save core member warning:', error);
+  }
+}
+
+export async function deleteCoreMemberFromFirestore(id: string): Promise<void> {
+  try {
+    const docRef = doc(db, 'core_team', id);
+    await deleteDoc(docRef);
+  } catch (error) {
+    console.warn('Firestore delete core member warning:', error);
+  }
+}
+
+export function subscribeFirestoreCoreTeam(
+  callback: (members: CoreTeamMember[]) => void
+): Unsubscribe {
+  const colRef = collection(db, 'core_team');
+  return onSnapshot(
+    colRef,
+    (snapshot) => {
+      const members: CoreTeamMember[] = [];
+      snapshot.forEach((docSnap) => {
+        const d = docSnap.data();
+        members.push({
+          id: d.id || docSnap.id,
+          name: d.name || '',
+          role: d.role || '',
+          category: d.category || 'Student Co-ordinator',
+          phone: d.phone || undefined,
+          email: d.email || undefined,
+          showPhonePublicly: Boolean(d.showPhonePublicly),
+          order: typeof d.order === 'number' ? d.order : 99,
+          photoUrl: d.photoUrl || undefined,
+        });
+      });
+      members.sort((a, b) => a.order - b.order);
+      callback(members);
+    },
+    (err) => {
+      console.warn('Firestore core team snapshot warning:', err);
+    }
+  );
+}
+

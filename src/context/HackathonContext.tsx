@@ -34,6 +34,14 @@ import {
   updateTeamSubmissionInFirestore,
   subscribeFirestoreTeams,
   testFirestoreConnection,
+  saveSiteConfigToFirestore,
+  subscribeFirestoreSiteConfig,
+  saveAnnouncementToFirestore,
+  deleteAnnouncementFromFirestore,
+  subscribeFirestoreAnnouncements,
+  saveCoreMemberToFirestore,
+  deleteCoreMemberFromFirestore,
+  subscribeFirestoreCoreTeam,
 } from '../lib/firebase';
 import {
   syncAllTeamsToGoogleSheet,
@@ -98,6 +106,7 @@ interface HackathonContextType {
   
   activeView: string;
   setActiveView: (view: string) => void;
+  navigateTo: (view: string, sectionId?: string) => void;
   
   showRegisterModal: boolean;
   setShowRegisterModal: (show: boolean) => void;
@@ -291,8 +300,8 @@ export const HackathonProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       }
     );
 
-    // Live multi-device Firestore subscription (any laptop, mobile, browser globally)
-    const unsubFirestore = subscribeFirestoreTeams((cloudTeams) => {
+    // Live multi-device Firestore subscriptions (any laptop, mobile, browser globally)
+    const unsubTeams = subscribeFirestoreTeams((cloudTeams) => {
       if (cloudTeams && cloudTeams.length > 0) {
         setRegisteredTeams((prev) => {
           const map = new Map<string, RegisteredTeam>();
@@ -305,9 +314,30 @@ export const HackathonProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       }
     });
 
+    const unsubConfig = subscribeFirestoreSiteConfig((remoteConfig) => {
+      if (remoteConfig && Object.keys(remoteConfig).length > 0) {
+        setEventConfig((prev) => ({ ...prev, ...remoteConfig }));
+      }
+    });
+
+    const unsubAnnouncements = subscribeFirestoreAnnouncements((remoteAnnouncements) => {
+      if (remoteAnnouncements && remoteAnnouncements.length > 0) {
+        setAnnouncements(remoteAnnouncements);
+      }
+    });
+
+    const unsubCoreTeam = subscribeFirestoreCoreTeam((remoteMembers) => {
+      if (remoteMembers && remoteMembers.length > 0) {
+        setCoreTeam(remoteMembers);
+      }
+    });
+
     return () => {
       unsubAuth();
-      unsubFirestore();
+      unsubTeams();
+      unsubConfig();
+      unsubAnnouncements();
+      unsubCoreTeam();
     };
   }, []);
 
@@ -410,23 +440,77 @@ export const HackathonProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     localStorage.setItem('ideation_registered_teams_prod', JSON.stringify(registeredTeams));
   }, [registeredTeams]);
 
-  // Central Database Synchronization & Live Polling
+  const broadcastLiveSync = (type = 'SYNC_ALL') => {
+    try {
+      const channel = new BroadcastChannel('ideation_live_sync');
+      channel.postMessage({ type, timestamp: Date.now() });
+      channel.close();
+    } catch {}
+  };
+
+  const navigateTo = (view: string, sectionId?: string) => {
+    setActiveView(view);
+    if (view === 'home') {
+      if (sectionId) {
+        setTimeout(() => {
+          const el = document.getElementById(sectionId);
+          if (el) {
+            el.scrollIntoView({ behavior: 'smooth' });
+            try {
+              window.history.pushState(null, '', `#${sectionId}`);
+            } catch {}
+          }
+        }, 100);
+      } else {
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+        try {
+          window.history.pushState(null, '', window.location.pathname);
+        } catch {}
+      }
+    } else {
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+      try {
+        window.history.pushState(null, '', `?view=${view}`);
+      } catch {}
+    }
+  };
+
+  // Central Database Synchronization & Live Polling (Teams, Config, News, Team)
   useEffect(() => {
     let isMounted = true;
 
     const syncWithCentralDatabase = async () => {
       try {
-        const res = await fetch('/api/teams');
+        const res = await fetch('/api/sync/all');
         if (res.ok) {
           const json = await res.json();
-          if (json.success && Array.isArray(json.data) && isMounted) {
-            setRegisteredTeams(json.data);
-            // If current team session is open, keep it in sync with updated database status
-            if (currentTeamSession) {
-              const updatedSession = json.data.find((t: RegisteredTeam) => t.id === currentTeamSession.id);
-              if (updatedSession) {
-                setCurrentTeamSession(updatedSession);
+          if (json.success && isMounted) {
+            if (Array.isArray(json.teams) && json.teams.length > 0) {
+              setRegisteredTeams(json.teams);
+              if (currentTeamSession) {
+                const updatedSession = json.teams.find((t: RegisteredTeam) => t.id === currentTeamSession.id);
+                if (updatedSession) {
+                  setCurrentTeamSession(updatedSession);
+                }
               }
+            }
+            if (json.config && typeof json.config === 'object' && Object.keys(json.config).length > 0) {
+              setEventConfig(prev => ({ ...prev, ...json.config }));
+            }
+            if (Array.isArray(json.announcements) && json.announcements.length > 0) {
+              setAnnouncements(json.announcements);
+            }
+            if (Array.isArray(json.coreTeam) && json.coreTeam.length > 0) {
+              setCoreTeam(json.coreTeam);
+            }
+          }
+        } else {
+          // Fallback to /api/teams
+          const teamsRes = await fetch('/api/teams');
+          if (teamsRes.ok) {
+            const teamsJson = await teamsRes.json();
+            if (teamsJson.success && Array.isArray(teamsJson.data) && isMounted) {
+              setRegisteredTeams(teamsJson.data);
             }
           }
         }
@@ -445,10 +529,8 @@ export const HackathonProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     let channel: BroadcastChannel | null = null;
     try {
       channel = new BroadcastChannel('ideation_live_sync');
-      channel.onmessage = (event) => {
-        if (event.data?.type === 'SYNC_TEAMS' && isMounted) {
-          syncWithCentralDatabase();
-        }
+      channel.onmessage = () => {
+        if (isMounted) syncWithCentralDatabase();
       };
     } catch {}
 
@@ -460,19 +542,32 @@ export const HackathonProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   }, [currentTeamSession?.id]);
 
   const updateEventConfig = (newConfig: Partial<EventConfig>) => {
-    setEventConfig(prev => ({ ...prev, ...newConfig }));
+    setEventConfig(prev => {
+      const merged = { ...prev, ...newConfig, updatedAt: new Date().toISOString() };
+      saveSiteConfigToFirestore(merged);
+      fetch('/api/config', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(merged),
+      }).catch(() => {});
+      broadcastLiveSync('SYNC_CONFIG');
+      return merged;
+    });
   };
 
   const updateTrack = (id: string, updated: Partial<DomainTrack>) => {
     setTracks(prev => prev.map(t => (t.id === id ? { ...t, ...updated } : t)));
+    broadcastLiveSync('SYNC_TRACKS');
   };
 
   const addTrack = (track: DomainTrack) => {
     setTracks(prev => [...prev, track]);
+    broadcastLiveSync('SYNC_TRACKS');
   };
 
   const deleteTrack = (id: string) => {
     setTracks(prev => prev.filter(t => t.id !== id));
+    broadcastLiveSync('SYNC_TRACKS');
   };
 
   const updatePrizes = (newPrizes: PrizeItem[]) => {
@@ -510,18 +605,54 @@ export const HackathonProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       date: new Date().toISOString().split('T')[0],
     };
     setAnnouncements(prev => [newAnnouncement, ...prev]);
+    saveAnnouncementToFirestore(newAnnouncement);
+    fetch('/api/announcements', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(newAnnouncement),
+    }).catch(() => {});
+    broadcastLiveSync('SYNC_ANNOUNCEMENTS');
   };
 
   const updateAnnouncement = (id: string, updated: Partial<Announcement>) => {
-    setAnnouncements(prev => prev.map(a => (a.id === id ? { ...a, ...updated } : a)));
+    setAnnouncements(prev => {
+      const next = prev.map(a => (a.id === id ? { ...a, ...updated } : a));
+      const target = next.find(a => a.id === id);
+      if (target) {
+        saveAnnouncementToFirestore(target);
+        fetch('/api/announcements', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(target),
+        }).catch(() => {});
+      }
+      broadcastLiveSync('SYNC_ANNOUNCEMENTS');
+      return next;
+    });
   };
 
   const deleteAnnouncement = (id: string) => {
     setAnnouncements(prev => prev.filter(a => a.id !== id));
+    deleteAnnouncementFromFirestore(id);
+    fetch(`/api/announcements/${id}`, { method: 'DELETE' }).catch(() => {});
+    broadcastLiveSync('SYNC_ANNOUNCEMENTS');
   };
 
   const updateCoreMember = (id: string, updated: Partial<CoreTeamMember>) => {
-    setCoreTeam(prev => prev.map(m => (m.id === id ? { ...m, ...updated } : m)));
+    setCoreTeam(prev => {
+      const next = prev.map(m => (m.id === id ? { ...m, ...updated } : m));
+      const target = next.find(m => m.id === id);
+      if (target) {
+        saveCoreMemberToFirestore(target);
+        fetch('/api/core-team', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(target),
+        }).catch(() => {});
+      }
+      broadcastLiveSync('SYNC_CORE_TEAM');
+      return next;
+    });
   };
 
   const addCoreMember = (member: Omit<CoreTeamMember, 'id'>) => {
@@ -530,10 +661,20 @@ export const HackathonProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       id: `ct-${Date.now()}`,
     };
     setCoreTeam(prev => [...prev, newMember]);
+    saveCoreMemberToFirestore(newMember);
+    fetch('/api/core-team', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(newMember),
+    }).catch(() => {});
+    broadcastLiveSync('SYNC_CORE_TEAM');
   };
 
   const deleteCoreMember = (id: string) => {
     setCoreTeam(prev => prev.filter(m => m.id !== id));
+    deleteCoreMemberFromFirestore(id);
+    fetch(`/api/core-team/${id}`, { method: 'DELETE' }).catch(() => {});
+    broadcastLiveSync('SYNC_CORE_TEAM');
   };
 
   const reorderCoreTeam = (sourceIndex: number, destIndex: number) => {
@@ -1260,6 +1401,7 @@ export const HackathonProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         setSelectedTrackForRegistration,
         activeView,
         setActiveView,
+        navigateTo,
         showRegisterModal,
         setShowRegisterModal,
         showCoreTeamPanel,

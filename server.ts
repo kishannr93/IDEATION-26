@@ -16,10 +16,39 @@ app.use(express.urlencoded({ extended: true, limit: '20mb' }));
 // Central Database Storage Path
 const DATA_DIR = path.resolve(__dirname, 'data');
 const DB_FILE = path.join(DATA_DIR, 'central_database.json');
+const CONFIG_FILE = path.join(DATA_DIR, 'event_config.json');
+const ANNOUNCEMENTS_FILE = path.join(DATA_DIR, 'announcements.json');
+const CORE_TEAM_FILE = path.join(DATA_DIR, 'core_team.json');
 
 // Ensure data directory exists
 if (!fs.existsSync(DATA_DIR)) {
   fs.mkdirSync(DATA_DIR, { recursive: true });
+}
+
+function readJsonFile<T>(filePath: string, defaultValue: T): T {
+  try {
+    if (!fs.existsSync(filePath)) {
+      fs.writeFileSync(filePath, JSON.stringify(defaultValue, null, 2), 'utf-8');
+      return defaultValue;
+    }
+    const raw = fs.readFileSync(filePath, 'utf-8');
+    return JSON.parse(raw) as T;
+  } catch (err) {
+    console.error(`Error reading ${filePath}:`, err);
+    return defaultValue;
+  }
+}
+
+function writeJsonFile<T>(filePath: string, data: T): boolean {
+  try {
+    const tempFile = `${filePath}.tmp`;
+    fs.writeFileSync(tempFile, JSON.stringify(data, null, 2), 'utf-8');
+    fs.renameSync(tempFile, filePath);
+    return true;
+  } catch (err) {
+    console.error(`Error writing ${filePath}:`, err);
+    return false;
+  }
 }
 
 export interface TeamMemberRecord {
@@ -583,6 +612,122 @@ app.patch('/api/teams/:id/evaluation', (req: Request, res: Response) => {
   writeDatabase(teams);
   return res.json({ success: true, data: team });
 });
+
+// 5.7 GET & UPDATE SITE CONFIGURATION AND DYNAMIC LINKS
+app.get('/api/config', (_req: Request, res: Response) => {
+  const config = readJsonFile(CONFIG_FILE, null);
+  return res.json({ success: true, data: config });
+});
+
+app.post('/api/config', (req: Request, res: Response) => {
+  const body = req.body;
+  const current = readJsonFile(CONFIG_FILE, {}) || {};
+  const updated = {
+    ...current,
+    ...body,
+    updatedAt: new Date().toISOString(),
+  };
+  writeJsonFile(CONFIG_FILE, updated);
+  return res.json({ success: true, data: updated });
+});
+
+// 5.8 GET, ADD, UPDATE & DELETE ANNOUNCEMENTS & NEWS
+app.get('/api/announcements', (_req: Request, res: Response) => {
+  const announcements = readJsonFile(ANNOUNCEMENTS_FILE, []);
+  return res.json({ success: true, count: announcements.length, data: announcements });
+});
+
+app.post('/api/announcements', (req: Request, res: Response) => {
+  const item = req.body;
+  if (!item || !item.title) {
+    return res.status(400).json({ success: false, error: 'Announcement title is required' });
+  }
+  const announcements = readJsonFile<any[]>(ANNOUNCEMENTS_FILE, []);
+  const existingIdx = announcements.findIndex(a => a.id === item.id);
+  const nowIso = new Date().toISOString();
+
+  if (existingIdx >= 0) {
+    announcements[existingIdx] = { ...announcements[existingIdx], ...item, date: item.date || nowIso };
+  } else {
+    const newItem = {
+      id: item.id || `ann_${Date.now()}`,
+      title: item.title,
+      content: item.content || '',
+      category: item.category || 'Update',
+      pinned: Boolean(item.pinned),
+      date: item.date || nowIso,
+      author: item.author || 'Anveshan Core Team',
+      link: item.link || undefined,
+      linkText: item.linkText || undefined,
+    };
+    announcements.unshift(newItem);
+  }
+
+  writeJsonFile(ANNOUNCEMENTS_FILE, announcements);
+  return res.json({ success: true, data: announcements });
+});
+
+app.delete('/api/announcements/:id', (req: Request, res: Response) => {
+  const id = req.params.id;
+  const announcements = readJsonFile<any[]>(ANNOUNCEMENTS_FILE, []);
+  const filtered = announcements.filter(a => a.id !== id);
+  writeJsonFile(ANNOUNCEMENTS_FILE, filtered);
+  return res.json({ success: true, data: filtered });
+});
+
+// 5.9 GET, ADD, UPDATE & DELETE CORE TEAM MEMBERS
+app.get('/api/core-team', (_req: Request, res: Response) => {
+  const members = readJsonFile(CORE_TEAM_FILE, []);
+  return res.json({ success: true, count: members.length, data: members });
+});
+
+app.post('/api/core-team', (req: Request, res: Response) => {
+  const member = req.body;
+  if (!member || !member.name || !member.role) {
+    return res.status(400).json({ success: false, error: 'Member name and role are required' });
+  }
+  const members = readJsonFile<any[]>(CORE_TEAM_FILE, []);
+  const existingIdx = members.findIndex(m => m.id === member.id);
+
+  if (existingIdx >= 0) {
+    members[existingIdx] = { ...members[existingIdx], ...member };
+  } else {
+    members.push({
+      ...member,
+      id: member.id || `tm_${Date.now()}`,
+      order: typeof member.order === 'number' ? member.order : members.length + 1,
+    });
+  }
+
+  writeJsonFile(CORE_TEAM_FILE, members);
+  return res.json({ success: true, data: members });
+});
+
+app.delete('/api/core-team/:id', (req: Request, res: Response) => {
+  const id = req.params.id;
+  const members = readJsonFile<any[]>(CORE_TEAM_FILE, []);
+  const filtered = members.filter(m => m.id !== id);
+  writeJsonFile(CORE_TEAM_FILE, filtered);
+  return res.json({ success: true, data: filtered });
+});
+
+// 5.10 UNIVERSAL CENTRAL SYNC (ALL DATA AT ONCE)
+app.get('/api/sync/all', (_req: Request, res: Response) => {
+  const teams = readDatabase();
+  const config = readJsonFile(CONFIG_FILE, null);
+  const announcements = readJsonFile(ANNOUNCEMENTS_FILE, []);
+  const coreTeam = readJsonFile(CORE_TEAM_FILE, []);
+
+  return res.json({
+    success: true,
+    timestamp: new Date().toISOString(),
+    teams,
+    config,
+    announcements,
+    coreTeam,
+  });
+});
+
 
 // 6. EXPORT CLEAN, PROPERLY ALIGNED CSV
 app.get('/api/export/csv', (_req: Request, res: Response) => {

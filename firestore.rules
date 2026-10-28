@@ -9,6 +9,18 @@ service cloud.firestore {
       allow update: if true;
       allow delete: if false;
     }
+    match /site_config/{configId} {
+      allow read: if true;
+      allow write: if true;
+    }
+    match /announcements/{announcementId} {
+      allow read: if true;
+      allow write: if true;
+    }
+    match /core_team/{memberId} {
+      allow read: if true;
+      allow write: if true;
+    }
     match /{document=**} {
       allow read, write: if false;
     }

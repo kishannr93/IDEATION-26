@@ -9,7 +9,7 @@ interface NavbarProps {
 }
 
 export const Navbar: React.FC<NavbarProps> = ({ onOpenQR }) => {
-  const { eventConfig, announcements, activeView, setActiveView, setShowRegisterModal, currentTeamSession } = useHackathon();
+  const { eventConfig, announcements, activeView, setActiveView, navigateTo, setShowRegisterModal, currentTeamSession } = useHackathon();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [isDownloadingTemplate, setIsDownloadingTemplate] = useState(false);
 
@@ -40,13 +40,17 @@ export const Navbar: React.FC<NavbarProps> = ({ onOpenQR }) => {
   return (
     <header className="sticky top-0 z-40 w-full bg-[#050B1A]/90 backdrop-blur-md border-b border-[#35E0FF]/15">
       {/* Live announcement marquee bar */}
-      <div className="bg-gradient-to-r from-[#0C1630] via-[#11234D] to-[#0C1630] py-1 px-4 border-b border-[#35E0FF]/10 text-xs text-[#9DB0D0] flex items-center overflow-hidden">
+      <div 
+        onClick={() => navigateTo('home', 'news')}
+        className="bg-gradient-to-r from-[#0C1630] via-[#11234D] to-[#0C1630] py-1 px-4 border-b border-[#35E0FF]/10 text-xs text-[#9DB0D0] flex items-center overflow-hidden cursor-pointer hover:bg-[#11234D]/80 transition-colors"
+        title="Click to view all live announcements & news"
+      >
         <div className="flex items-center gap-2 shrink-0 font-tech text-[#35E0FF] font-semibold tracking-wider uppercase pr-3 border-r border-[#35E0FF]/20">
           <Megaphone className="w-3.5 h-3.5 text-[#FF8A2A] animate-pulse" />
           <span>Live Ticker</span>
         </div>
         <div className="overflow-hidden whitespace-nowrap w-full pl-3">
-          <div className="inline-block animate-[marquee_28s_linear_infinite] hover:[animation-play-state:paused] cursor-pointer text-xs font-mono text-[#F2F6FF]/90">
+          <div className="inline-block animate-[marquee_28s_linear_infinite] hover:[animation-play-state:paused] text-xs font-mono text-[#F2F6FF]/90">
             {marqueeText}
           </div>
         </div>
@@ -56,7 +60,7 @@ export const Navbar: React.FC<NavbarProps> = ({ onOpenQR }) => {
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between gap-8">
         {/* Zone 1: Brand Wordmark */}
         <div 
-          onClick={() => { setActiveView('home'); window.scrollTo({ top: 0, behavior: 'smooth' }); }}
+          onClick={() => navigateTo('home')}
           className="flex items-center gap-3 cursor-pointer group shrink-0"
         >
           <div className="relative w-10 h-10 rounded-xl overflow-hidden bg-[#0C1630] border border-[#35E0FF]/40 group-hover:border-[#35E0FF] transition-all duration-300 shadow-[0_0_15px_rgba(53,224,255,0.3)] p-0.5 flex items-center justify-center">
@@ -79,11 +83,8 @@ export const Navbar: React.FC<NavbarProps> = ({ onOpenQR }) => {
           <a 
             href="#tracks" 
             onClick={(e) => {
-              if (activeView !== 'home') {
-                e.preventDefault();
-                setActiveView('home');
-                setTimeout(() => document.getElementById('tracks')?.scrollIntoView({ behavior: 'smooth' }), 100);
-              }
+              e.preventDefault();
+              navigateTo('home', 'tracks');
             }}
             className="hover:text-[#35E0FF] transition-colors whitespace-nowrap shrink-0 hover:underline underline-offset-8 decoration-[#35E0FF]/40"
           >
@@ -92,11 +93,8 @@ export const Navbar: React.FC<NavbarProps> = ({ onOpenQR }) => {
           <a 
             href="#prizes" 
             onClick={(e) => {
-              if (activeView !== 'home') {
-                e.preventDefault();
-                setActiveView('home');
-                setTimeout(() => document.getElementById('prizes')?.scrollIntoView({ behavior: 'smooth' }), 100);
-              }
+              e.preventDefault();
+              navigateTo('home', 'prizes');
             }}
             className="hover:text-[#35E0FF] transition-colors whitespace-nowrap shrink-0 hover:underline underline-offset-8 decoration-[#35E0FF]/40"
           >
@@ -105,11 +103,8 @@ export const Navbar: React.FC<NavbarProps> = ({ onOpenQR }) => {
           <a 
             href="#schedule" 
             onClick={(e) => {
-              if (activeView !== 'home') {
-                e.preventDefault();
-                setActiveView('home');
-                setTimeout(() => document.getElementById('schedule')?.scrollIntoView({ behavior: 'smooth' }), 100);
-              }
+              e.preventDefault();
+              navigateTo('home', 'schedule');
             }}
             className="hover:text-[#35E0FF] transition-colors whitespace-nowrap shrink-0 hover:underline underline-offset-8 decoration-[#35E0FF]/40"
           >
@@ -118,11 +113,8 @@ export const Navbar: React.FC<NavbarProps> = ({ onOpenQR }) => {
           <a 
             href="#rules" 
             onClick={(e) => {
-              if (activeView !== 'home') {
-                e.preventDefault();
-                setActiveView('home');
-                setTimeout(() => document.getElementById('rules')?.scrollIntoView({ behavior: 'smooth' }), 100);
-              }
+              e.preventDefault();
+              navigateTo('home', 'rules');
             }}
             className="hover:text-[#35E0FF] transition-colors whitespace-nowrap shrink-0 hover:underline underline-offset-8 decoration-[#35E0FF]/40"
           >
@@ -131,11 +123,8 @@ export const Navbar: React.FC<NavbarProps> = ({ onOpenQR }) => {
           <a 
             href="#news" 
             onClick={(e) => {
-              if (activeView !== 'home') {
-                e.preventDefault();
-                setActiveView('home');
-                setTimeout(() => document.getElementById('news')?.scrollIntoView({ behavior: 'smooth' }), 100);
-              }
+              e.preventDefault();
+              navigateTo('home', 'news');
             }}
             className="hover:text-[#35E0FF] transition-colors whitespace-nowrap shrink-0 hover:underline underline-offset-8 decoration-[#35E0FF]/40"
           >
@@ -144,11 +133,8 @@ export const Navbar: React.FC<NavbarProps> = ({ onOpenQR }) => {
           <a 
             href="#location" 
             onClick={(e) => {
-              if (activeView !== 'home') {
-                e.preventDefault();
-                setActiveView('home');
-                setTimeout(() => document.getElementById('location')?.scrollIntoView({ behavior: 'smooth' }), 100);
-              }
+              e.preventDefault();
+              navigateTo('home', 'location');
             }}
             className="hover:text-[#35E0FF] transition-colors whitespace-nowrap shrink-0 hover:underline underline-offset-8 decoration-[#35E0FF]/40"
           >
@@ -187,8 +173,8 @@ export const Navbar: React.FC<NavbarProps> = ({ onOpenQR }) => {
             </button>
           ) : (
             <button
-              onClick={() => setActiveView('dashboard')}
-              className="hidden lg:flex items-center gap-1 text-xs text-[#9DB0D0] hover:text-[#35E0FF] transition-colors whitespace-nowrap px-2"
+              onClick={() => navigateTo('dashboard')}
+              className="hidden lg:flex items-center gap-1 text-xs text-[#9DB0D0] hover:text-[#35E0FF] transition-colors whitespace-nowrap px-2 cursor-pointer"
             >
               Team Login
             </button>
@@ -196,7 +182,7 @@ export const Navbar: React.FC<NavbarProps> = ({ onOpenQR }) => {
 
           <button
             onClick={() => setShowRegisterModal(true)}
-            className="relative group px-4 py-2 text-xs sm:text-sm font-bold text-white bg-gradient-to-r from-[#FF8A2A] to-[#F5611A] rounded-lg shadow-[0_0_18px_rgba(255,138,42,0.4)] hover:shadow-[0_0_24px_rgba(255,138,42,0.6)] hover:brightness-110 active:scale-95 transition-all whitespace-nowrap flex items-center gap-1.5"
+            className="relative group px-4 py-2 text-xs sm:text-sm font-bold text-white bg-gradient-to-r from-[#FF8A2A] to-[#F5611A] rounded-lg shadow-[0_0_18px_rgba(255,138,42,0.4)] hover:shadow-[0_0_24px_rgba(255,138,42,0.6)] hover:brightness-110 active:scale-95 transition-all whitespace-nowrap flex items-center gap-1.5 cursor-pointer"
           >
             <span>Register Now</span>
             <span className="text-[10px] bg-black/30 px-1.5 py-0.5 rounded text-amber-200">₹{eventConfig.entryFee}</span>
@@ -205,7 +191,7 @@ export const Navbar: React.FC<NavbarProps> = ({ onOpenQR }) => {
           {/* Mobile hamburger */}
           <button
             onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
-            className="md:hidden p-2 text-[#9DB0D0] hover:text-white rounded-lg hover:bg-[#0C1630] transition-colors"
+            className="md:hidden p-2 text-[#9DB0D0] hover:text-white rounded-lg hover:bg-[#0C1630] transition-colors cursor-pointer"
             aria-label="Toggle navigation menu"
           >
             {mobileMenuOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
@@ -217,68 +203,62 @@ export const Navbar: React.FC<NavbarProps> = ({ onOpenQR }) => {
       {mobileMenuOpen && (
         <div className="md:hidden bg-[#0C1630]/98 border-b border-[#35E0FF]/20 px-5 py-4 space-y-3">
           <div className="flex flex-col space-y-2 text-sm font-medium">
-            <a 
-              href="#tracks" 
-              onClick={() => { setMobileMenuOpen(false); setActiveView('home'); }}
-              className="py-2 text-[#9DB0D0] hover:text-[#35E0FF] border-b border-[#78AAFF]/10"
+            <button 
+              onClick={() => { setMobileMenuOpen(false); navigateTo('home', 'tracks'); }}
+              className="py-2 text-left text-[#9DB0D0] hover:text-[#35E0FF] border-b border-[#78AAFF]/10 cursor-pointer"
             >
               Domain Tracks
-            </a>
-            <a 
-              href="#prizes" 
-              onClick={() => { setMobileMenuOpen(false); setActiveView('home'); }}
-              className="py-2 text-[#9DB0D0] hover:text-[#35E0FF] border-b border-[#78AAFF]/10"
+            </button>
+            <button 
+              onClick={() => { setMobileMenuOpen(false); navigateTo('home', 'prizes'); }}
+              className="py-2 text-left text-[#9DB0D0] hover:text-[#35E0FF] border-b border-[#78AAFF]/10 cursor-pointer"
             >
               Prizes & Awards
-            </a>
-            <a 
-              href="#schedule" 
-              onClick={() => { setMobileMenuOpen(false); setActiveView('home'); }}
-              className="py-2 text-[#9DB0D0] hover:text-[#35E0FF] border-b border-[#78AAFF]/10"
+            </button>
+            <button 
+              onClick={() => { setMobileMenuOpen(false); navigateTo('home', 'schedule'); }}
+              className="py-2 text-left text-[#9DB0D0] hover:text-[#35E0FF] border-b border-[#78AAFF]/10 cursor-pointer"
             >
               24-Hour Schedule
-            </a>
-            <a 
-              href="#rules" 
-              onClick={() => { setMobileMenuOpen(false); setActiveView('home'); }}
-              className="py-2 text-[#9DB0D0] hover:text-[#35E0FF] border-b border-[#78AAFF]/10"
+            </button>
+            <button 
+              onClick={() => { setMobileMenuOpen(false); navigateTo('home', 'rules'); }}
+              className="py-2 text-left text-[#9DB0D0] hover:text-[#35E0FF] border-b border-[#78AAFF]/10 cursor-pointer"
             >
               Rules & Eligibility
-            </a>
-            <a 
-              href="#news" 
-              onClick={() => { setMobileMenuOpen(false); setActiveView('home'); }}
-              className="py-2 text-[#9DB0D0] hover:text-[#35E0FF] border-b border-[#78AAFF]/10"
+            </button>
+            <button 
+              onClick={() => { setMobileMenuOpen(false); navigateTo('home', 'news'); }}
+              className="py-2 text-left text-[#9DB0D0] hover:text-[#35E0FF] border-b border-[#78AAFF]/10 cursor-pointer"
             >
               Announcements
-            </a>
-            <a 
-              href="#location" 
-              onClick={() => { setMobileMenuOpen(false); setActiveView('home'); }}
-              className="py-2 text-[#9DB0D0] hover:text-[#35E0FF] border-b border-[#78AAFF]/10"
+            </button>
+            <button 
+              onClick={() => { setMobileMenuOpen(false); navigateTo('home', 'location'); }}
+              className="py-2 text-left text-[#9DB0D0] hover:text-[#35E0FF] border-b border-[#78AAFF]/10 cursor-pointer"
             >
               Venue & Location
-            </a>
+            </button>
             <button
               onClick={() => {
                 setMobileMenuOpen(false);
                 handleDownloadTemplate();
               }}
               disabled={isDownloadingTemplate}
-              className="py-2 text-left text-[#35E0FF] font-semibold border-b border-[#78AAFF]/10 flex items-center justify-between"
+              className="py-2 text-left text-[#35E0FF] font-semibold border-b border-[#78AAFF]/10 flex items-center justify-between cursor-pointer"
             >
               <span>{isDownloadingTemplate ? 'Generating PPT...' : 'Download PPT Template (.pptx)'}</span>
               <Download className="w-4 h-4 text-[#35E0FF]" />
             </button>
             <button
-              onClick={() => { setMobileMenuOpen(false); setActiveView('dashboard'); }}
-              className="py-2 text-left text-[#35E0FF] font-semibold border-b border-[#78AAFF]/10"
+              onClick={() => { setMobileMenuOpen(false); navigateTo('dashboard'); }}
+              className="py-2 text-left text-[#35E0FF] font-semibold border-b border-[#78AAFF]/10 cursor-pointer"
             >
               Participant Dashboard / PPT Submission
             </button>
             <button
-              onClick={() => { setMobileMenuOpen(false); setActiveView('admin'); }}
-              className="py-2 text-left text-[#FF8A2A] font-semibold flex items-center justify-between"
+              onClick={() => { setMobileMenuOpen(false); navigateTo('admin'); }}
+              className="py-2 text-left text-[#FF8A2A] font-semibold flex items-center justify-between cursor-pointer"
             >
               <span>Admin Console</span>
               <ShieldCheck className="w-4 h-4" />

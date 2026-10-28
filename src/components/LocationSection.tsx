@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { useHackathon } from '../context/HackathonContext';
 import {
   MapPin,
   Navigation,
@@ -17,9 +18,10 @@ import {
 } from 'lucide-react';
 
 export const LocationSection: React.FC = () => {
+  const { eventConfig } = useHackathon();
   const [copied, setCopied] = useState(false);
-  const fullAddress = '325, Shamanur Rd, BIET, Davangere, Karnataka 577004';
-  const venueTitle = 'Bapuji Institute of Engineering and Technology (BIET)';
+  const fullAddress = eventConfig?.locationAddress || '325, Shamanur Rd, BIET, Davangere, Karnataka 577004';
+  const venueTitle = eventConfig?.collegeName || 'Bapuji Institute of Engineering and Technology (BIET)';
 
   const handleCopy = () => {
     navigator.clipboard.writeText(fullAddress);

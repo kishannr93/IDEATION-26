@@ -9,7 +9,7 @@ interface HeroSectionProps {
 }
 
 export const HeroSection: React.FC<HeroSectionProps> = ({ onOpenQR }) => {
-  const { eventConfig, setShowRegisterModal, registeredTeams } = useHackathon();
+  const { eventConfig, setShowRegisterModal, registeredTeams, navigateTo } = useHackathon();
   const [downloadingPpt, setDownloadingPpt] = useState(false);
 
   // Dynamic Countdown timer tracking structured metadata startDate (December 1, 2026)
@@ -69,6 +69,10 @@ export const HeroSection: React.FC<HeroSectionProps> = ({ onOpenQR }) => {
   };
 
   const handleDownloadTemplate = async () => {
+    if (eventConfig?.officialPptLink) {
+      window.open(eventConfig.officialPptLink, '_blank', 'noopener,noreferrer');
+      return;
+    }
     try {
       setDownloadingPpt(true);
       await generatePptTemplate({
@@ -251,12 +255,12 @@ export const HeroSection: React.FC<HeroSectionProps> = ({ onOpenQR }) => {
               <ArrowRight className="w-5 h-5 group-hover:translate-x-1 transition-transform" />
             </button>
 
-            <a
-              href="#tracks"
-              className="px-6 py-3.5 rounded-xl font-semibold text-sm text-[#F2F6FF] bg-[#0C1630] hover:bg-[#132247] border border-[#35E0FF]/40 hover:border-[#35E0FF] transition-all flex items-center gap-2"
+            <button
+              onClick={() => navigateTo('home', 'tracks')}
+              className="px-6 py-3.5 rounded-xl font-semibold text-sm text-[#F2F6FF] bg-[#0C1630] hover:bg-[#132247] border border-[#35E0FF]/40 hover:border-[#35E0FF] transition-all flex items-center gap-2 cursor-pointer"
             >
               <span>View 6 Tracks</span>
-            </a>
+            </button>
 
             <button
               onClick={handleDownloadTemplate}

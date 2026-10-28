@@ -1,14 +1,14 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useHackathon } from '../context/HackathonContext';
 import { DomainTrack } from '../types';
-import { Sprout, Building2, Bot, HeartPulse, Cpu, Lightbulb, ArrowRight, X, Wrench, CheckCircle2 } from 'lucide-react';
+import { Sprout, Building2, Bot, HeartPulse, Cpu, Lightbulb, ArrowRight, X, Wrench, CheckCircle2, ExternalLink } from 'lucide-react';
 import gsap from 'gsap';
 import { ScrollTrigger } from 'gsap/ScrollTrigger';
 
 gsap.registerPlugin(ScrollTrigger);
 
 export const TracksSection: React.FC = () => {
-  const { tracks, setSelectedTrackForRegistration, setShowRegisterModal } = useHackathon();
+  const { tracks, setSelectedTrackForRegistration, setShowRegisterModal, eventConfig } = useHackathon();
   const [activeTrack, setActiveTrack] = useState<DomainTrack | null>(null);
 
   const sectionRef = useRef<HTMLElement>(null);
@@ -233,6 +233,20 @@ export const TracksSection: React.FC = () => {
                     </div>
                   ))}
                 </div>
+
+                {eventConfig?.problemStatementsLink && (
+                  <div className="mt-2.5">
+                    <a
+                      href={eventConfig.problemStatementsLink}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#35E0FF]/15 hover:bg-[#35E0FF]/25 text-[#35E0FF] text-xs font-semibold border border-[#35E0FF]/30 transition-all cursor-pointer"
+                    >
+                      <span>Open Full Detailed Problem Statements Folder</span>
+                      <ExternalLink className="w-3.5 h-3.5" />
+                    </a>
+                  </div>
+                )}
               </div>
 
               <div>
