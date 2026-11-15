@@ -554,6 +554,7 @@ export type SiteContentSection =
   | 'faqs'
   | 'announcements'
   | 'core_team_index'
+  | 'team_sections'
   | 'deleted_teams';
 
 export interface SiteContentDoc<T = unknown> {

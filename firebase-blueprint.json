@@ -91,7 +91,7 @@
       "properties": {
         "section": {
           "type": "string",
-          "enum": ["rules", "schedule", "tracks", "prizes", "faqs", "announcements", "core_team_index", "deleted_teams"],
+          "enum": ["rules", "schedule", "tracks", "prizes", "faqs", "announcements", "core_team_index", "team_sections", "deleted_teams"],
           "description": "Content section identifier"
         },
         "items": {

@@ -6,6 +6,7 @@ import {
   ScheduleEvent,
   Announcement,
   CoreTeamMember,
+  CustomTeamSection,
   RuleItem,
   FAQItem,
   RegisteredTeam,
@@ -87,6 +88,12 @@ interface HackathonContextType {
   addCoreMember: (member: Omit<CoreTeamMember, 'id'>) => void;
   deleteCoreMember: (id: string) => void;
   reorderCoreTeam: (sourceIndex: number, destIndex: number) => void;
+
+  customTeamSections: CustomTeamSection[];
+  addCustomTeamSection: (section: Omit<CustomTeamSection, 'id' | 'order'>) => CustomTeamSection | null;
+  updateCustomTeamSection: (id: string, updated: Partial<CustomTeamSection>) => void;
+  deleteCustomTeamSection: (id: string, reassignTo?: string) => void;
+  ensureCustomTeamSection: (name: string) => void;
   
   rules: RuleItem[];
   updateRules: (rules: RuleItem[]) => void;
@@ -231,6 +238,19 @@ export const HackathonProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   const [coreTeam, setCoreTeam] = useState<CoreTeamMember[]>(() => {
     const saved = localStorage.getItem('ideation_core_team');
     return saved ? JSON.parse(saved) : initialCoreTeam;
+  });
+
+  const [customTeamSections, setCustomTeamSections] = useState<CustomTeamSection[]>(() => {
+    const saved = localStorage.getItem('ideation_team_sections');
+    if (saved) {
+      try {
+        const parsed = JSON.parse(saved);
+        return Array.isArray(parsed) ? parsed : [];
+      } catch {
+        return [];
+      }
+    }
+    return [];
   });
 
   const [rules, setRules] = useState<RuleItem[]>(() => {
@@ -504,6 +524,13 @@ export const HackathonProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       applyCoreTeamSnapshot(remoteMembers, fromServer);
     });
 
+    const unsubTeamSections = subscribeFirestoreSiteContent<CustomTeamSection>('team_sections', (payload) => {
+      if (shouldApplyRemoteUpdate('team_sections', payload.updatedAt)) {
+        recordSyncTimestamp('team_sections', payload.updatedAt);
+        setCustomTeamSections([...payload.items].sort((a, b) => a.order - b.order));
+      }
+    });
+
     // Live cross-device subscriptions for Rules, Schedule, Tracks, Prizes, and FAQs
     const unsubRules = subscribeFirestoreSiteContent<RuleItem>('rules', (payload) => {
       if (shouldApplyRemoteUpdate('rules', payload.updatedAt)) {
@@ -549,6 +576,7 @@ export const HackathonProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       unsubAnnouncements();
       unsubCoreTeamIndex();
       unsubCoreTeam();
+      unsubTeamSections();
       unsubRules();
       unsubSchedule();
       unsubTracks();
@@ -647,6 +675,10 @@ export const HackathonProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   useEffect(() => {
     localStorage.setItem('ideation_core_team', JSON.stringify(coreTeam));
   }, [coreTeam]);
+
+  useEffect(() => {
+    localStorage.setItem('ideation_team_sections', JSON.stringify(customTeamSections));
+  }, [customTeamSections]);
 
   useEffect(() => {
     localStorage.setItem('ideation_rules', JSON.stringify(rules));
@@ -759,6 +791,10 @@ export const HackathonProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       if (snapshot.coreTeam.length > 0) {
         applyCoreTeamSnapshot(snapshot.coreTeam, true);
       }
+      if (snapshot.sections.team_sections && shouldApplyRemoteUpdate('team_sections', snapshot.sections.team_sections.updatedAt)) {
+        recordSyncTimestamp('team_sections', snapshot.sections.team_sections.updatedAt);
+        setCustomTeamSections([...(snapshot.sections.team_sections.items as CustomTeamSection[])].sort((a, b) => a.order - b.order));
+      }
       if (snapshot.teams.length > 0 || deletedDoc) {
         applyTeamsSnapshot(snapshot.teams, true);
       }
@@ -806,6 +842,10 @@ export const HackathonProvider: React.FC<{ children: React.ReactNode }> = ({ chi
             }
             if (Array.isArray(json.coreTeam) && json.coreTeam.length > 0) {
               applyCoreTeamSnapshot(json.coreTeam, false);
+            }
+            if (json.teamSections && Array.isArray(json.teamSections.items) && shouldApplyRemoteUpdate('team_sections', json.teamSections.updatedAt)) {
+              recordSyncTimestamp('team_sections', json.teamSections.updatedAt);
+              setCustomTeamSections([...json.teamSections.items].sort((a: CustomTeamSection, b: CustomTeamSection) => a.order - b.order));
             }
             if (json.rules && Array.isArray(json.rules.items) && shouldApplyRemoteUpdate('rules', json.rules.updatedAt)) {
               recordSyncTimestamp('rules', json.rules.updatedAt);
@@ -1064,6 +1104,125 @@ export const HackathonProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       persistCoreTeamSnapshot(reordered);
       return reordered;
     });
+  };
+
+  const BUILT_IN_CATEGORIES = new Set(['faculty', 'student co-ordinator', 'contact helpline']);
+
+  const ensureCustomTeamSection = (rawName: string) => {
+    const cleanName = rawName.trim();
+    if (!cleanName || BUILT_IN_CATEGORIES.has(cleanName.toLowerCase())) return;
+    setCustomTeamSections(prev => {
+      if (prev.some(s => s.name.trim().toLowerCase() === cleanName.toLowerCase())) {
+        return prev;
+      }
+      const next: CustomTeamSection[] = [
+        ...prev,
+        {
+          id: `sec-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+          name: cleanName,
+          accentColor: (['magenta', 'cyan', 'emerald', 'amber'] as const)[prev.length % 4],
+          order: prev.length + 1,
+        },
+      ];
+      persistContentSection('team_sections', next);
+      return next;
+    });
+  };
+
+  const addCustomTeamSection = (section: Omit<CustomTeamSection, 'id' | 'order'>): CustomTeamSection | null => {
+    const cleanName = section.name.trim();
+    if (!cleanName || BUILT_IN_CATEGORIES.has(cleanName.toLowerCase())) return null;
+
+    let created: CustomTeamSection | null = null;
+    setCustomTeamSections(prev => {
+      const existing = prev.find(s => s.name.trim().toLowerCase() === cleanName.toLowerCase());
+      if (existing) {
+        created = existing;
+        return prev;
+      }
+      const newSec: CustomTeamSection = {
+        id: `sec-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+        name: cleanName,
+        description: section.description?.trim() || undefined,
+        accentColor: section.accentColor || (['magenta', 'cyan', 'emerald', 'amber'] as const)[prev.length % 4],
+        order: prev.length + 1,
+      };
+      created = newSec;
+      const next = [...prev, newSec];
+      persistContentSection('team_sections', next);
+      return next;
+    });
+    return created;
+  };
+
+  const updateCustomTeamSection = (id: string, updated: Partial<CustomTeamSection>) => {
+    const existing = customTeamSections.find(s => s.id === id);
+    if (!existing) return;
+
+    const nextName = updated.name !== undefined ? updated.name.trim() : existing.name;
+    if (!nextName) return;
+
+    setCustomTeamSections(prev => {
+      const next = prev.map(s =>
+        s.id === id
+          ? {
+              ...s,
+              ...updated,
+              name: nextName,
+              description: updated.description !== undefined ? updated.description.trim() || undefined : s.description,
+            }
+          : s
+      );
+      persistContentSection('team_sections', next);
+      return next;
+    });
+
+    if (nextName !== existing.name) {
+      const oldLower = existing.name.trim().toLowerCase();
+      setCoreTeam(prev => {
+        let changed = false;
+        const next = prev.map(m => {
+          if (m.category.trim().toLowerCase() === oldLower) {
+            changed = true;
+            return { ...m, category: nextName };
+          }
+          return m;
+        });
+        if (changed) {
+          persistCoreTeamSnapshot(next);
+        }
+        return next;
+      });
+    }
+  };
+
+  const deleteCustomTeamSection = (id: string, reassignTo = 'Student Co-ordinator') => {
+    const target = customTeamSections.find(s => s.id === id);
+    setCustomTeamSections(prev => {
+      const next = prev
+        .filter(s => s.id !== id)
+        .map((s, idx) => ({ ...s, order: idx + 1 }));
+      persistContentSection('team_sections', next);
+      return next;
+    });
+
+    if (target) {
+      const targetLower = target.name.trim().toLowerCase();
+      setCoreTeam(prev => {
+        let changed = false;
+        const next = prev.map(m => {
+          if (m.category.trim().toLowerCase() === targetLower) {
+            changed = true;
+            return { ...m, category: reassignTo };
+          }
+          return m;
+        });
+        if (changed) {
+          persistCoreTeamSnapshot(next);
+        }
+        return next;
+      });
+    }
   };
 
   const updateRules = (newRules: RuleItem[]) => {
@@ -1820,6 +1979,7 @@ export const HackathonProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       recordSyncTimestamp('faqs', nowIso);
       recordSyncTimestamp('announcements', nowIso);
       recordSyncTimestamp('core_team_index', nowIso);
+      recordSyncTimestamp('team_sections', nowIso);
       recordSyncTimestamp('deleted_teams', nowIso);
 
       await Promise.all([
@@ -1831,6 +1991,7 @@ export const HackathonProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         saveSiteContentToFirestore('faqs', faqs, nowIso),
         saveSiteContentToFirestore('announcements', announcements, nowIso),
         saveSiteContentToFirestore('core_team_index', coreIds, nowIso),
+        saveSiteContentToFirestore('team_sections', customTeamSections, nowIso),
         saveSiteContentToFirestore('deleted_teams', deletedTeamIdsRef.current, nowIso),
         ...coreTeam.map((m) => saveCoreMemberToFirestore(m)),
         ...announcements.map((a) => saveAnnouncementToFirestore(a)),
@@ -1846,6 +2007,7 @@ export const HackathonProvider: React.FC<{ children: React.ReactNode }> = ({ chi
           config: mergedConfig,
           announcements,
           coreTeam,
+          teamSections: customTeamSections,
           rules,
           schedule,
           tracks,
@@ -1904,6 +2066,9 @@ export const HackathonProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     setCoreTeam(initialCoreTeam);
     persistCoreTeamSnapshot(initialCoreTeam);
 
+    setCustomTeamSections([]);
+    persistContentSection('team_sections', []);
+
     setRegisteredTeams(initialRegisteredTeams);
     setCurrentTeamSession(null);
     broadcastLiveSync('SYNC_ALL');
@@ -1935,6 +2100,11 @@ export const HackathonProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         addCoreMember,
         deleteCoreMember,
         reorderCoreTeam,
+        customTeamSections,
+        addCustomTeamSection,
+        updateCustomTeamSection,
+        deleteCustomTeamSection,
+        ensureCustomTeamSection,
         rules,
         updateRules,
         addRule,

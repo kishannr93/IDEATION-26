@@ -113,11 +113,21 @@ export interface Announcement {
   linkText?: string;
 }
 
+export type BuiltInTeamCategory = 'Faculty' | 'Student Co-ordinator' | 'Contact Helpline';
+
+export interface CustomTeamSection {
+  id: string;
+  name: string;
+  description?: string;
+  accentColor?: 'cyan' | 'magenta' | 'amber' | 'emerald';
+  order: number;
+}
+
 export interface CoreTeamMember {
   id: string;
   name: string;
   role: string;
-  category: 'Faculty' | 'Student Co-ordinator' | 'Contact Helpline';
+  category: string;
   phone?: string;
   email?: string;
   showPhonePublicly: boolean;

@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useHackathon } from '../context/HackathonContext';
-import { RegisteredTeam, DomainTrack, Announcement, CoreTeamMember, ScheduleEvent, RuleItem, ProjectSubmission, SubmissionNotification } from '../types';
+import { RegisteredTeam, DomainTrack, Announcement, CoreTeamMember, CustomTeamSection, ScheduleEvent, RuleItem, ProjectSubmission, SubmissionNotification } from '../types';
 import { sendTransactionalEmail, generatePassEmailHtml } from '../lib/email';
 import { AdminQRScanner } from './AdminQRScanner';
 import { AdminRealtimeToasts, AdminRealtimeToast, playAdminNotificationTone } from './AdminRealtimeToasts';
@@ -68,6 +68,11 @@ export const AdminPanel: React.FC = () => {
     updateCoreMember,
     addCoreMember,
     deleteCoreMember,
+    customTeamSections,
+    addCustomTeamSection,
+    updateCustomTeamSection,
+    deleteCustomTeamSection,
+    ensureCustomTeamSection,
     exportTeamsToCSV,
     exportTeamsToSQL,
     resetAllData,
@@ -475,11 +480,12 @@ export const AdminPanel: React.FC = () => {
   const [checkInInput, setCheckInInput] = useState('');
   const [checkInMessage, setCheckInMessage] = useState<{ text: string; success: boolean } | null>(null);
 
-  // New Core Team Member Form
+  // New Core Team Member & Custom Committee Sections Form
   const [newMember, setNewMember] = useState({
     name: '',
     role: '',
-    category: 'Student Co-ordinator' as CoreTeamMember['category'],
+    category: 'Student Co-ordinator' as string,
+    customCategoryInput: '',
     phone: '',
     email: '',
     showPhonePublicly: true,
@@ -487,6 +493,27 @@ export const AdminPanel: React.FC = () => {
   });
   const [editingPhotoMember, setEditingPhotoMember] = useState<CoreTeamMember | null>(null);
   const [photoModalInput, setPhotoModalInput] = useState('');
+  const [newSectionForm, setNewSectionForm] = useState({
+    name: '',
+    description: '',
+    accentColor: 'magenta' as NonNullable<CustomTeamSection['accentColor']>,
+  });
+  const [editingSectionId, setEditingSectionId] = useState<string | null>(null);
+  const [editingSectionForm, setEditingSectionForm] = useState({
+    name: '',
+    description: '',
+    accentColor: 'magenta' as NonNullable<CustomTeamSection['accentColor']>,
+  });
+  const [confirmDeleteSectionId, setConfirmDeleteSectionId] = useState<string | null>(null);
+  const [sectionFilter, setSectionFilter] = useState<string>('ALL');
+  const [editingMemberId, setEditingMemberId] = useState<string | null>(null);
+  const [editingMemberForm, setEditingMemberForm] = useState<{
+    name: string;
+    role: string;
+    category: string;
+    phone: string;
+    email: string;
+  }>({ name: '', role: '', category: '', phone: '', email: '' });
 
   // Schedule Admin State
   const [newScheduleEvent, setNewScheduleEvent] = useState<Omit<ScheduleEvent, 'id'>>({
@@ -777,10 +804,19 @@ export const AdminPanel: React.FC = () => {
   const handleAddMember = (e: React.FormEvent) => {
     e.preventDefault();
     if (!newMember.name || !newMember.role) return;
+    const resolvedCategory =
+      newMember.category === '__NEW__'
+        ? newMember.customCategoryInput.trim() || 'Student Co-ordinator'
+        : newMember.category;
+
+    if (newMember.category === '__NEW__' && newMember.customCategoryInput.trim()) {
+      ensureCustomTeamSection(newMember.customCategoryInput.trim());
+    }
+
     addCoreMember({
       name: newMember.name,
       role: newMember.role,
-      category: newMember.category,
+      category: resolvedCategory,
       phone: newMember.phone || undefined,
       email: newMember.email || undefined,
       showPhonePublicly: newMember.showPhonePublicly,
@@ -790,11 +826,28 @@ export const AdminPanel: React.FC = () => {
     setNewMember({
       name: '',
       role: '',
-      category: 'Student Co-ordinator',
+      category: resolvedCategory,
+      customCategoryInput: '',
       phone: '',
       email: '',
       showPhonePublicly: true,
       photoUrl: '',
+    });
+  };
+
+  const handleCreateTeamSection = (e: React.FormEvent) => {
+    e.preventDefault();
+    const clean = newSectionForm.name.trim();
+    if (!clean) return;
+    addCustomTeamSection({
+      name: clean,
+      description: newSectionForm.description.trim() || undefined,
+      accentColor: newSectionForm.accentColor,
+    });
+    setNewSectionForm({
+      name: '',
+      description: '',
+      accentColor: newSectionForm.accentColor,
     });
   };
 
@@ -2604,13 +2657,335 @@ export const AdminPanel: React.FC = () => {
             )}
 
             {/* TAB 7: CORE TEAM MANAGER */}
-            {activeTab === 'coreteam' && (
+            {activeTab === 'coreteam' && (() => {
+              const builtInCategories = ['Faculty', 'Student Co-ordinator', 'Contact Helpline'];
+              const allSectionNames = Array.from(
+                new Set([
+                  ...builtInCategories,
+                  ...customTeamSections.map(s => s.name),
+                  ...coreTeam.map(m => m.category).filter(Boolean),
+                ])
+              );
+              const filteredMembers =
+                sectionFilter === 'ALL'
+                  ? coreTeam
+                  : coreTeam.filter(m => (m.category || '').trim().toLowerCase() === sectionFilter.trim().toLowerCase());
+
+              return (
               <div className="space-y-6">
-                {/* Add member card */}
+                {/* 1. Custom Committee Sections Manager */}
+                <div className="p-6 rounded-2xl bg-[#0C1630] border border-[#FF4FD8]/25">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-4">
+                    <div>
+                      <h3 className="font-display font-bold text-base text-white flex items-center gap-2">
+                        <Layers className="w-4 h-4 text-[#FF4FD8]" />
+                        <span>Team Sections & Committees</span>
+                      </h3>
+                      <p className="text-xs text-[#9DB0D0] mt-0.5">
+                        Create named sections (e.g., Design Committee, Media Committee) and assign students directly to each section.
+                      </p>
+                    </div>
+                    <span className="text-[11px] font-mono text-[#35E0FF] bg-[#081024] px-2.5 py-1 rounded-lg border border-[#35E0FF]/20 self-start">
+                      {customTeamSections.length} Custom {customTeamSections.length === 1 ? 'Section' : 'Sections'}
+                    </span>
+                  </div>
+
+                  {/* Quick Presets */}
+                  <div className="flex flex-wrap items-center gap-2 mb-4 text-[11px]">
+                    <span className="text-[#9DB0D0] font-mono">Quick Add:</span>
+                    {[
+                      { name: 'Design Committee', desc: 'Visual branding, posters & UI assets', color: 'magenta' as const },
+                      { name: 'Media Committee', desc: 'Photography, reels & live social coverage', color: 'cyan' as const },
+                      { name: 'Technical Committee', desc: 'Stage tech, infrastructure & judging portal', color: 'emerald' as const },
+                      { name: 'Hospitality Committee', desc: 'Registration desk, food & guest care', color: 'amber' as const },
+                    ].map((preset) => {
+                      const alreadyExists = customTeamSections.some(
+                        s => s.name.trim().toLowerCase() === preset.name.toLowerCase()
+                      );
+                      return (
+                        <button
+                          key={preset.name}
+                          type="button"
+                          disabled={alreadyExists}
+                          onClick={() =>
+                            addCustomTeamSection({
+                              name: preset.name,
+                              description: preset.desc,
+                              accentColor: preset.color,
+                            })
+                          }
+                          className={`px-2.5 py-1 rounded-lg font-mono border transition-all ${
+                            alreadyExists
+                              ? 'bg-[#081024] text-[#9DB0D0]/50 border-[#78AAFF]/10 cursor-not-allowed'
+                              : 'bg-[#132247] hover:bg-[#1a2d5c] text-[#35E0FF] border-[#35E0FF]/30 cursor-pointer'
+                          }`}
+                        >
+                          {alreadyExists ? `✓ ${preset.name}` : `+ ${preset.name}`}
+                        </button>
+                      );
+                    })}
+                  </div>
+
+                  {/* Create New Section Form */}
+                  <form onSubmit={handleCreateTeamSection} className="grid grid-cols-1 sm:grid-cols-12 gap-3 text-xs bg-[#081024] p-4 rounded-xl border border-[#78AAFF]/15 mb-4">
+                    <div className="sm:col-span-4">
+                      <label className="block text-[#9DB0D0] mb-1">Committee / Section Name *</label>
+                      <input
+                        type="text"
+                        required
+                        placeholder="e.g. Design Committee or Media Committee"
+                        value={newSectionForm.name}
+                        onChange={(e) => setNewSectionForm({ ...newSectionForm, name: e.target.value })}
+                        className="w-full px-3 py-2 bg-[#0C1630] border border-[#78AAFF]/20 rounded-xl text-white focus:outline-none focus:border-[#FF4FD8]"
+                      />
+                    </div>
+                    <div className="sm:col-span-4">
+                      <label className="block text-[#9DB0D0] mb-1">Subtitle / Responsibilities (optional)</label>
+                      <input
+                        type="text"
+                        placeholder="e.g. Posters, banners & visual media"
+                        value={newSectionForm.description}
+                        onChange={(e) => setNewSectionForm({ ...newSectionForm, description: e.target.value })}
+                        className="w-full px-3 py-2 bg-[#0C1630] border border-[#78AAFF]/20 rounded-xl text-white focus:outline-none focus:border-[#FF4FD8]"
+                      />
+                    </div>
+                    <div className="sm:col-span-2">
+                      <label className="block text-[#9DB0D0] mb-1">Accent Color</label>
+                      <select
+                        value={newSectionForm.accentColor}
+                        onChange={(e) => setNewSectionForm({ ...newSectionForm, accentColor: e.target.value as NonNullable<CustomTeamSection['accentColor']> })}
+                        className="w-full px-3 py-2 bg-[#0C1630] border border-[#78AAFF]/20 rounded-xl text-white focus:outline-none focus:border-[#FF4FD8]"
+                      >
+                        <option value="magenta">Magenta</option>
+                        <option value="cyan">Cyan</option>
+                        <option value="emerald">Emerald</option>
+                        <option value="amber">Amber</option>
+                      </select>
+                    </div>
+                    <div className="sm:col-span-2 flex items-end">
+                      <button
+                        type="submit"
+                        className="w-full px-4 py-2 rounded-xl font-bold text-white bg-gradient-to-r from-[#FF4FD8] to-[#8F35FF] hover:brightness-110 active:scale-95 transition-all cursor-pointer flex items-center justify-center gap-1.5"
+                      >
+                        <Plus className="w-3.5 h-3.5" />
+                        <span>Add Section</span>
+                      </button>
+                    </div>
+                  </form>
+
+                  {/* Custom Sections List with Direct Student Assignment */}
+                  {customTeamSections.length === 0 ? (
+                    <div className="text-xs text-[#9DB0D0] bg-[#081024]/60 border border-dashed border-[#78AAFF]/20 rounded-xl p-4 text-center">
+                      No custom committees created yet. Use a Quick Add button above or type a section name like <strong className="text-white">Design Committee</strong> or <strong className="text-white">Media Committee</strong>.
+                    </div>
+                  ) : (
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                      {customTeamSections.map((sec) => {
+                        const assignedMembers = coreTeam.filter(
+                          m => (m.category || '').trim().toLowerCase() === sec.name.trim().toLowerCase()
+                        );
+                        const assignableCandidates = coreTeam.filter(
+                          m => (m.category || '').trim().toLowerCase() !== sec.name.trim().toLowerCase()
+                        );
+                        const isEditingThis = editingSectionId === sec.id;
+                        const isConfirmingDelete = confirmDeleteSectionId === sec.id;
+
+                        return (
+                          <div
+                            key={sec.id}
+                            className="p-4 rounded-xl bg-[#081024] border border-[#78AAFF]/20 hover:border-[#35E0FF]/35 transition-colors space-y-3 text-xs"
+                          >
+                            {isEditingThis ? (
+                              <div className="space-y-2.5">
+                                <input
+                                  type="text"
+                                  value={editingSectionForm.name}
+                                  onChange={(e) => setEditingSectionForm({ ...editingSectionForm, name: e.target.value })}
+                                  placeholder="Section Name"
+                                  className="w-full px-3 py-1.5 bg-[#0C1630] border border-[#35E0FF]/40 rounded-lg text-white font-semibold"
+                                />
+                                <input
+                                  type="text"
+                                  value={editingSectionForm.description}
+                                  onChange={(e) => setEditingSectionForm({ ...editingSectionForm, description: e.target.value })}
+                                  placeholder="Optional description"
+                                  className="w-full px-3 py-1.5 bg-[#0C1630] border border-[#78AAFF]/20 rounded-lg text-[#9DB0D0]"
+                                />
+                                <div className="flex items-center justify-between gap-2">
+                                  <select
+                                    value={editingSectionForm.accentColor}
+                                    onChange={(e) =>
+                                      setEditingSectionForm({
+                                        ...editingSectionForm,
+                                        accentColor: e.target.value as NonNullable<CustomTeamSection['accentColor']>,
+                                      })
+                                    }
+                                    className="px-2.5 py-1.5 bg-[#0C1630] border border-[#78AAFF]/20 rounded-lg text-white"
+                                  >
+                                    <option value="magenta">Magenta</option>
+                                    <option value="cyan">Cyan</option>
+                                    <option value="emerald">Emerald</option>
+                                    <option value="amber">Amber</option>
+                                  </select>
+                                  <div className="flex items-center gap-2">
+                                    <button
+                                      type="button"
+                                      onClick={() => setEditingSectionId(null)}
+                                      className="px-2.5 py-1 rounded-lg bg-[#0C1630] text-[#9DB0D0] hover:text-white border border-[#78AAFF]/20"
+                                    >
+                                      Cancel
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        if (editingSectionForm.name.trim()) {
+                                          updateCustomTeamSection(sec.id, editingSectionForm);
+                                        }
+                                        setEditingSectionId(null);
+                                      }}
+                                      className="px-3 py-1 rounded-lg bg-[#35E0FF]/20 text-[#35E0FF] border border-[#35E0FF]/40 font-semibold"
+                                    >
+                                      Save
+                                    </button>
+                                  </div>
+                                </div>
+                              </div>
+                            ) : (
+                              <>
+                                <div className="flex items-start justify-between gap-2">
+                                  <div>
+                                    <div className="flex items-center gap-2">
+                                      <span className="font-bold text-white text-sm">{sec.name}</span>
+                                      <span className="px-2 py-0.5 rounded bg-[#132247] text-[#35E0FF] font-mono text-[10px]">
+                                        {assignedMembers.length} {assignedMembers.length === 1 ? 'Student' : 'Students'}
+                                      </span>
+                                    </div>
+                                    {sec.description && (
+                                      <p className="text-[11px] text-[#9DB0D0] mt-0.5">{sec.description}</p>
+                                    )}
+                                    {assignedMembers.length === 0 && (
+                                      <p className="text-[10px] text-amber-300/90 mt-1 font-mono">
+                                        Assign at least 1 student to show this section on the public Team page.
+                                      </p>
+                                    )}
+                                  </div>
+
+                                  <div className="flex items-center gap-1.5 shrink-0">
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        setEditingSectionId(sec.id);
+                                        setEditingSectionForm({
+                                          name: sec.name,
+                                          description: sec.description || '',
+                                          accentColor: sec.accentColor || 'magenta',
+                                        });
+                                      }}
+                                      className="p-1.5 rounded-lg text-[#35E0FF] hover:bg-[#132247] transition-colors"
+                                      title="Rename / edit section"
+                                    >
+                                      <Edit className="w-3.5 h-3.5" />
+                                    </button>
+                                    {!isConfirmingDelete ? (
+                                      <button
+                                        type="button"
+                                        onClick={() => setConfirmDeleteSectionId(sec.id)}
+                                        className="p-1.5 rounded-lg text-rose-400 hover:bg-rose-500/10 transition-colors"
+                                        title="Delete section"
+                                      >
+                                        <Trash2 className="w-3.5 h-3.5" />
+                                      </button>
+                                    ) : (
+                                      <div className="flex items-center gap-1">
+                                        <button
+                                          type="button"
+                                          onClick={() => {
+                                            deleteCustomTeamSection(sec.id, 'Student Co-ordinator');
+                                            setConfirmDeleteSectionId(null);
+                                          }}
+                                          className="px-2 py-1 rounded bg-rose-500 text-white font-semibold text-[10px]"
+                                        >
+                                          Confirm
+                                        </button>
+                                        <button
+                                          type="button"
+                                          onClick={() => setConfirmDeleteSectionId(null)}
+                                          className="px-1.5 py-1 rounded bg-[#132247] text-[#9DB0D0] text-[10px]"
+                                        >
+                                          No
+                                        </button>
+                                      </div>
+                                    )}
+                                  </div>
+                                </div>
+
+                                {/* Assigned Student Chips */}
+                                {assignedMembers.length > 0 && (
+                                  <div className="flex flex-wrap gap-1.5">
+                                    {assignedMembers.map((mem) => (
+                                      <span
+                                        key={mem.id}
+                                        className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-[#0C1630] border border-[#78AAFF]/20 text-white text-[11px]"
+                                      >
+                                        <span>{mem.name}</span>
+                                        <button
+                                          type="button"
+                                          onClick={() => updateCoreMember(mem.id, { category: 'Student Co-ordinator' })}
+                                          title="Move back to Student Co-ordinator"
+                                          className="text-[#9DB0D0] hover:text-rose-400 transition-colors"
+                                        >
+                                          <X className="w-3 h-3" />
+                                        </button>
+                                      </span>
+                                    ))}
+                                  </div>
+                                )}
+
+                                {/* Quick Assign Existing Student Selector */}
+                                <div className="flex items-center gap-2 pt-1">
+                                  <select
+                                    value=""
+                                    onChange={(e) => {
+                                      const memberId = e.target.value;
+                                      if (memberId) {
+                                        updateCoreMember(memberId, { category: sec.name });
+                                      }
+                                    }}
+                                    className="flex-1 px-2.5 py-1.5 bg-[#0C1630] border border-[#35E0FF]/25 rounded-lg text-white text-[11px] focus:outline-none focus:border-[#35E0FF]"
+                                  >
+                                    <option value="">
+                                      {assignableCandidates.length > 0
+                                        ? `+ Assign existing member to ${sec.name}...`
+                                        : 'All members already assigned'}
+                                    </option>
+                                    {assignableCandidates.map((cand) => (
+                                      <option key={cand.id} value={cand.id}>
+                                        {cand.name} ({cand.category} · {cand.role})
+                                      </option>
+                                    ))}
+                                  </select>
+                                  <button
+                                    type="button"
+                                    onClick={() => setNewMember({ ...newMember, category: sec.name, customCategoryInput: '' })}
+                                    className="px-2.5 py-1.5 rounded-lg bg-[#132247] hover:bg-[#1a2d5c] text-[#35E0FF] border border-[#35E0FF]/30 text-[11px] font-mono shrink-0"
+                                  >
+                                    + New Student
+                                  </button>
+                                </div>
+                              </>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+
+                {/* 2. Add member card */}
                 <div className="p-6 rounded-2xl bg-[#0C1630] border border-[#78AAFF]/20">
                   <h3 className="font-display font-bold text-base text-white mb-4 flex items-center justify-between">
-                    <span>Add Committee Member</span>
-                    <span className="text-xs font-mono text-[#35E0FF]">Supports Profile Photo & Initials</span>
+                    <span>Add Committee Member / Student</span>
+                    <span className="text-xs font-mono text-[#35E0FF]">Supports Custom Committees, Photo & Initials</span>
                   </h3>
                   <form onSubmit={handleAddMember} className="space-y-4 text-xs">
                     <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
@@ -2619,7 +2994,7 @@ export const AdminPanel: React.FC = () => {
                         <input
                           type="text"
                           required
-                          placeholder="e.g. Prof. Radhika Priya Y R"
+                          placeholder="e.g. Ananya Kulkarni"
                           value={newMember.name}
                           onChange={(e) => setNewMember({ ...newMember, name: e.target.value })}
                           className="w-full px-3 py-2 bg-[#081024] border border-[#78AAFF]/20 rounded-xl text-white focus:outline-none focus:border-[#35E0FF]"
@@ -2631,7 +3006,7 @@ export const AdminPanel: React.FC = () => {
                         <input
                           type="text"
                           required
-                          placeholder="e.g. Lead Student Co-ordinator"
+                          placeholder="e.g. Design Lead / Poster Designer"
                           value={newMember.role}
                           onChange={(e) => setNewMember({ ...newMember, role: e.target.value })}
                           className="w-full px-3 py-2 bg-[#081024] border border-[#78AAFF]/20 rounded-xl text-white focus:outline-none focus:border-[#35E0FF]"
@@ -2639,16 +3014,38 @@ export const AdminPanel: React.FC = () => {
                       </div>
 
                       <div>
-                        <label className="block text-[#9DB0D0] mb-1">Category</label>
+                        <label className="block text-[#9DB0D0] mb-1">Committee / Section</label>
                         <select
                           value={newMember.category}
-                          onChange={(e) => setNewMember({ ...newMember, category: e.target.value as any })}
+                          onChange={(e) => setNewMember({ ...newMember, category: e.target.value })}
                           className="w-full px-3 py-2 bg-[#081024] border border-[#78AAFF]/20 rounded-xl text-white focus:outline-none focus:border-[#35E0FF]"
                         >
-                          <option value="Faculty">Faculty</option>
-                          <option value="Student Co-ordinator">Student Co-ordinator</option>
-                          <option value="Contact Helpline">Contact Helpline</option>
+                          <optgroup label="Default Sections">
+                            <option value="Faculty">Faculty</option>
+                            <option value="Student Co-ordinator">Student Co-ordinator</option>
+                            <option value="Contact Helpline">Contact Helpline</option>
+                          </optgroup>
+                          {customTeamSections.length > 0 && (
+                            <optgroup label="Custom Committees">
+                              {customTeamSections.map((sec) => (
+                                <option key={sec.id} value={sec.name}>
+                                  {sec.name}
+                                </option>
+                              ))}
+                            </optgroup>
+                          )}
+                          <option value="__NEW__">+ Create New Committee Name...</option>
                         </select>
+                        {newMember.category === '__NEW__' && (
+                          <input
+                            type="text"
+                            required
+                            placeholder="Enter committee name (e.g. Media Committee)"
+                            value={newMember.customCategoryInput}
+                            onChange={(e) => setNewMember({ ...newMember, customCategoryInput: e.target.value })}
+                            className="w-full mt-2 px-3 py-2 bg-[#081024] border border-[#FF4FD8]/40 rounded-xl text-white focus:outline-none focus:border-[#FF4FD8]"
+                          />
+                        )}
                       </div>
 
                       <div>
@@ -2771,15 +3168,54 @@ export const AdminPanel: React.FC = () => {
                   </form>
                 </div>
 
-                {/* List of members with photo status and editor */}
+                {/* 3. List of members with section filter, inline committee assignment & photo editor */}
                 <div className="p-6 rounded-2xl bg-[#0C1630] border border-[#78AAFF]/20">
-                  <h4 className="font-bold text-white text-sm mb-4 flex items-center justify-between">
-                    <span>Current Committee Members ({coreTeam.length})</span>
-                    <span className="text-xs text-[#9DB0D0] font-normal">Click "Add/Edit Photo" to update any profile image</span>
-                  </h4>
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-4">
+                    <h4 className="font-bold text-white text-sm">
+                      Current Committee Members ({filteredMembers.length}{sectionFilter !== 'ALL' ? ` in ${sectionFilter}` : ''})
+                    </h4>
+                    <span className="text-xs text-[#9DB0D0] font-normal">
+                      Use the Committee dropdown on any row to move students between sections
+                    </span>
+                  </div>
+
+                  {/* Section Filter Tabs */}
+                  <div className="flex flex-wrap gap-1.5 mb-4">
+                    <button
+                      type="button"
+                      onClick={() => setSectionFilter('ALL')}
+                      className={`px-3 py-1 rounded-lg text-[11px] font-mono transition-colors ${
+                        sectionFilter === 'ALL'
+                          ? 'bg-[#35E0FF]/20 text-[#35E0FF] border border-[#35E0FF]/40 font-semibold'
+                          : 'bg-[#081024] text-[#9DB0D0] border border-[#78AAFF]/15 hover:text-white'
+                      }`}
+                    >
+                      All ({coreTeam.length})
+                    </button>
+                    {allSectionNames.map((secName) => {
+                      const count = coreTeam.filter(
+                        m => (m.category || '').trim().toLowerCase() === secName.trim().toLowerCase()
+                      ).length;
+                      const isActive = sectionFilter.toLowerCase() === secName.toLowerCase();
+                      return (
+                        <button
+                          key={secName}
+                          type="button"
+                          onClick={() => setSectionFilter(secName)}
+                          className={`px-3 py-1 rounded-lg text-[11px] font-mono transition-colors ${
+                            isActive
+                              ? 'bg-[#FF4FD8]/20 text-[#FF4FD8] border border-[#FF4FD8]/40 font-semibold'
+                              : 'bg-[#081024] text-[#9DB0D0] border border-[#78AAFF]/15 hover:text-white'
+                          }`}
+                        >
+                          {secName} ({count})
+                        </button>
+                      );
+                    })}
+                  </div>
 
                   <div className="space-y-2.5">
-                    {coreTeam.map((m) => {
+                    {filteredMembers.map((m) => {
                       const initials = m.name
                         ? m.name
                             .replace(/^(prof\.|dr\.|mr\.|mrs\.|ms\.)\s+/i, '')
@@ -2789,88 +3225,188 @@ export const AdminPanel: React.FC = () => {
                             .join('')
                             .toUpperCase()
                         : 'TM';
+                      const isEditingRow = editingMemberId === m.id;
 
                       return (
                         <div
                           key={m.id}
-                          className="p-3.5 rounded-xl bg-[#081024] border border-[#78AAFF]/15 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs hover:border-[#35E0FF]/30 transition-colors"
+                          className="p-3.5 rounded-xl bg-[#081024] border border-[#78AAFF]/15 flex flex-col lg:flex-row lg:items-center justify-between gap-3 text-xs hover:border-[#35E0FF]/30 transition-colors"
                         >
-                          <div className="flex items-center gap-3">
-                            {/* Member Avatar */}
-                            <div className="w-11 h-11 rounded-xl overflow-hidden border border-[#35E0FF]/30 bg-[#0C1630] flex items-center justify-center shrink-0 shadow-sm">
-                              {m.photoUrl ? (
-                                <img src={m.photoUrl} alt={m.name} className="w-full h-full object-cover" />
-                              ) : (
-                                <div className="font-display font-bold text-xs text-[#35E0FF] tracking-wider">
-                                  {initials}
-                                </div>
-                              )}
-                            </div>
-
-                            <div>
-                              <div className="font-bold text-white flex items-center gap-2">
-                                <span>{m.name}</span>
-                                <span className="text-[10px] font-mono text-[#35E0FF] bg-[#132247] px-2 py-0.5 rounded border border-[#35E0FF]/20">
-                                  {m.category}
-                                </span>
-                                {m.photoUrl ? (
-                                  <span className="text-[9px] font-mono text-emerald-400 bg-emerald-500/10 px-1.5 py-0.5 rounded">
-                                    Photo Set
-                                  </span>
-                                ) : (
-                                  <span className="text-[9px] font-mono text-amber-300 bg-amber-500/10 px-1.5 py-0.5 rounded">
-                                    Initials ({initials})
-                                  </span>
-                                )}
-                              </div>
-                              <div className="text-[11px] text-[#9DB0D0] mt-0.5">
-                                {m.role} {m.phone ? `· ${m.phone}` : ''} {m.email ? `· ${m.email}` : ''}
-                              </div>
-                            </div>
-                          </div>
-
-                          <div className="flex items-center gap-2 self-end sm:self-auto shrink-0">
-                            {/* Photo update button */}
-                            <button
-                              onClick={() => {
-                                setEditingPhotoMember(m);
-                                setPhotoModalInput(m.photoUrl || '');
-                              }}
-                              className="px-2.5 py-1 rounded-lg bg-[#132247] hover:bg-[#1a2d5c] text-[#35E0FF] border border-[#35E0FF]/30 text-[11px] font-mono font-semibold flex items-center gap-1 transition-colors"
-                            >
-                              <Camera className="w-3 h-3" />
-                              <span>{m.photoUrl ? 'Change Photo' : 'Add Photo'}</span>
-                            </button>
-
-                            {m.photoUrl && (
-                              <button
-                                onClick={() => updateCoreMember(m.id, { photoUrl: undefined })}
-                                title="Remove photo and fallback to name initials"
-                                className="px-2 py-1 rounded-lg bg-rose-500/10 hover:bg-rose-500/20 text-rose-300 border border-rose-400/20 text-[10px] font-mono transition-colors"
+                          {isEditingRow ? (
+                            <div className="w-full grid grid-cols-1 sm:grid-cols-6 gap-2 items-center">
+                              <input
+                                type="text"
+                                value={editingMemberForm.name}
+                                onChange={(e) => setEditingMemberForm({ ...editingMemberForm, name: e.target.value })}
+                                placeholder="Full Name"
+                                className="sm:col-span-2 px-2.5 py-1.5 bg-[#0C1630] border border-[#35E0FF]/30 rounded-lg text-white"
+                              />
+                              <input
+                                type="text"
+                                value={editingMemberForm.role}
+                                onChange={(e) => setEditingMemberForm({ ...editingMemberForm, role: e.target.value })}
+                                placeholder="Role"
+                                className="px-2.5 py-1.5 bg-[#0C1630] border border-[#78AAFF]/20 rounded-lg text-white"
+                              />
+                              <select
+                                value={editingMemberForm.category}
+                                onChange={(e) => setEditingMemberForm({ ...editingMemberForm, category: e.target.value })}
+                                className="px-2.5 py-1.5 bg-[#0C1630] border border-[#78AAFF]/20 rounded-lg text-white"
                               >
-                                Remove
-                              </button>
-                            )}
+                                {allSectionNames.map((secName) => (
+                                  <option key={secName} value={secName}>
+                                    {secName}
+                                  </option>
+                                ))}
+                              </select>
+                              <input
+                                type="text"
+                                value={editingMemberForm.phone}
+                                onChange={(e) => setEditingMemberForm({ ...editingMemberForm, phone: e.target.value })}
+                                placeholder="Phone"
+                                className="px-2.5 py-1.5 bg-[#0C1630] border border-[#78AAFF]/20 rounded-lg text-white"
+                              />
+                              <div className="flex items-center justify-end gap-1.5">
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    if (editingMemberForm.name.trim() && editingMemberForm.role.trim()) {
+                                      updateCoreMember(m.id, {
+                                        name: editingMemberForm.name.trim(),
+                                        role: editingMemberForm.role.trim(),
+                                        category: editingMemberForm.category || m.category,
+                                        phone: editingMemberForm.phone.trim() || undefined,
+                                        email: editingMemberForm.email.trim() || undefined,
+                                      });
+                                    }
+                                    setEditingMemberId(null);
+                                  }}
+                                  className="px-3 py-1.5 rounded-lg bg-[#35E0FF]/20 text-[#35E0FF] border border-[#35E0FF]/40 font-semibold"
+                                >
+                                  Save
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => setEditingMemberId(null)}
+                                  className="px-2.5 py-1.5 rounded-lg bg-[#0C1630] text-[#9DB0D0] border border-[#78AAFF]/20"
+                                >
+                                  Cancel
+                                </button>
+                              </div>
+                            </div>
+                          ) : (
+                            <>
+                              <div className="flex items-center gap-3 min-w-0">
+                                {/* Member Avatar */}
+                                <div className="w-11 h-11 rounded-xl overflow-hidden border border-[#35E0FF]/30 bg-[#0C1630] flex items-center justify-center shrink-0 shadow-sm">
+                                  {m.photoUrl ? (
+                                    <img src={m.photoUrl} alt={m.name} className="w-full h-full object-cover" />
+                                  ) : (
+                                    <div className="font-display font-bold text-xs text-[#35E0FF] tracking-wider">
+                                      {initials}
+                                    </div>
+                                  )}
+                                </div>
 
-                            <button
-                              onClick={() => updateCoreMember(m.id, { showPhonePublicly: !m.showPhonePublicly })}
-                              className={`px-2.5 py-1 rounded-lg text-[10px] font-mono font-semibold transition-colors ${
-                                m.showPhonePublicly
-                                  ? 'text-emerald-300 bg-emerald-500/15 border border-emerald-500/30'
-                                  : 'text-[#9DB0D0] bg-[#132247] border border-[#78AAFF]/15'
-                              }`}
-                            >
-                              {m.showPhonePublicly ? 'Phone Public' : 'Phone Hidden'}
-                            </button>
+                                <div className="min-w-0">
+                                  <div className="font-bold text-white flex flex-wrap items-center gap-2">
+                                    <span>{m.name}</span>
+                                    {m.photoUrl ? (
+                                      <span className="text-[9px] font-mono text-emerald-400 bg-emerald-500/10 px-1.5 py-0.5 rounded">
+                                        Photo Set
+                                      </span>
+                                    ) : (
+                                      <span className="text-[9px] font-mono text-amber-300 bg-amber-500/10 px-1.5 py-0.5 rounded">
+                                        Initials ({initials})
+                                      </span>
+                                    )}
+                                  </div>
+                                  <div className="text-[11px] text-[#9DB0D0] mt-0.5 truncate">
+                                    {m.role} {m.phone ? `· ${m.phone}` : ''} {m.email ? `· ${m.email}` : ''}
+                                  </div>
+                                </div>
+                              </div>
 
-                            <button
-                              onClick={() => deleteCoreMember(m.id)}
-                              className="p-1.5 text-rose-400 hover:text-white hover:bg-rose-500/10 rounded-lg transition-colors"
-                              title="Delete member"
-                            >
-                              <Trash2 className="w-4 h-4" />
-                            </button>
-                          </div>
+                              <div className="flex flex-wrap items-center gap-2 self-end lg:self-auto shrink-0">
+                                {/* Inline Committee / Section Reassignment */}
+                                <select
+                                  aria-label={`Assign committee for ${m.name}`}
+                                  value={m.category}
+                                  onChange={(e) => updateCoreMember(m.id, { category: e.target.value })}
+                                  className="px-2.5 py-1 rounded-lg bg-[#132247] text-[#35E0FF] border border-[#35E0FF]/30 text-[11px] font-mono focus:outline-none focus:border-[#35E0FF]"
+                                >
+                                  {allSectionNames.map((secName) => (
+                                    <option key={secName} value={secName} className="bg-[#081024] text-white">
+                                      {secName}
+                                    </option>
+                                  ))}
+                                </select>
+
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setEditingMemberId(m.id);
+                                    setEditingMemberForm({
+                                      name: m.name,
+                                      role: m.role,
+                                      category: m.category,
+                                      phone: m.phone || '',
+                                      email: m.email || '',
+                                    });
+                                  }}
+                                  className="p-1.5 rounded-lg bg-[#132247] hover:bg-[#1a2d5c] text-[#9DB0D0] hover:text-white border border-[#78AAFF]/20 transition-colors"
+                                  title="Edit member details"
+                                >
+                                  <Edit className="w-3.5 h-3.5" />
+                                </button>
+
+                                {/* Photo update button */}
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setEditingPhotoMember(m);
+                                    setPhotoModalInput(m.photoUrl || '');
+                                  }}
+                                  className="px-2.5 py-1 rounded-lg bg-[#132247] hover:bg-[#1a2d5c] text-[#35E0FF] border border-[#35E0FF]/30 text-[11px] font-mono font-semibold flex items-center gap-1 transition-colors"
+                                >
+                                  <Camera className="w-3 h-3" />
+                                  <span>{m.photoUrl ? 'Change Photo' : 'Add Photo'}</span>
+                                </button>
+
+                                {m.photoUrl && (
+                                  <button
+                                    type="button"
+                                    onClick={() => updateCoreMember(m.id, { photoUrl: undefined })}
+                                    title="Remove photo and fallback to name initials"
+                                    className="px-2 py-1 rounded-lg bg-rose-500/10 hover:bg-rose-500/20 text-rose-300 border border-rose-400/20 text-[10px] font-mono transition-colors"
+                                  >
+                                    Remove
+                                  </button>
+                                )}
+
+                                <button
+                                  type="button"
+                                  onClick={() => updateCoreMember(m.id, { showPhonePublicly: !m.showPhonePublicly })}
+                                  className={`px-2.5 py-1 rounded-lg text-[10px] font-mono font-semibold transition-colors ${
+                                    m.showPhonePublicly
+                                      ? 'text-emerald-300 bg-emerald-500/15 border border-emerald-500/30'
+                                      : 'text-[#9DB0D0] bg-[#132247] border border-[#78AAFF]/15'
+                                  }`}
+                                >
+                                  {m.showPhonePublicly ? 'Phone Public' : 'Phone Hidden'}
+                                </button>
+
+                                <button
+                                  type="button"
+                                  onClick={() => deleteCoreMember(m.id)}
+                                  className="p-1.5 text-rose-400 hover:text-white hover:bg-rose-500/10 rounded-lg transition-colors"
+                                  title="Delete member"
+                                >
+                                  <Trash2 className="w-4 h-4" />
+                                </button>
+                              </div>
+                            </>
+                          )}
                         </div>
                       );
                     })}
@@ -2998,7 +3534,8 @@ export const AdminPanel: React.FC = () => {
                   </div>
                 )}
               </div>
-            )}
+              );
+            })()}
 
             {/* TAB 8: SCHEDULE & TIMELINE MANAGER */}
             {activeTab === 'schedule' && (

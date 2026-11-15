@@ -1,6 +1,7 @@
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import { useHackathon } from '../context/HackathonContext';
-import { X, Phone, Mail, Award, GraduationCap } from 'lucide-react';
+import { X, Phone, Mail, Award, GraduationCap, Layers } from 'lucide-react';
+import { CustomTeamSection } from '../types';
 
 const getInitials = (name: string): string => {
   if (!name) return 'TM';
@@ -10,6 +11,38 @@ const getInitials = (name: string): string => {
   if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
   return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
 };
+
+const DRAWER_ACCENTS: Record<
+  NonNullable<CustomTeamSection['accentColor']>,
+  { text: string; border: string; hoverBorder: string; avatarBorder: string }
+> = {
+  cyan: {
+    text: 'text-[#35E0FF]',
+    border: 'border-[#78AAFF]/15',
+    hoverBorder: 'hover:border-[#35E0FF]/40',
+    avatarBorder: 'border-[#35E0FF]/40',
+  },
+  magenta: {
+    text: 'text-[#FF4FD8]',
+    border: 'border-[#78AAFF]/15',
+    hoverBorder: 'hover:border-[#FF4FD8]/40',
+    avatarBorder: 'border-[#FF4FD8]/40',
+  },
+  amber: {
+    text: 'text-[#FF8A2A]',
+    border: 'border-[#FF8A2A]/20',
+    hoverBorder: 'hover:border-[#FF8A2A]/45',
+    avatarBorder: 'border-[#FF8A2A]/40',
+  },
+  emerald: {
+    text: 'text-emerald-400',
+    border: 'border-emerald-400/20',
+    hoverBorder: 'hover:border-emerald-400/45',
+    avatarBorder: 'border-emerald-400/40',
+  },
+};
+
+const BUILT_IN_LOWER = new Set(['faculty', 'student co-ordinator', 'contact helpline']);
 
 const DrawerAvatar: React.FC<{
   photoUrl?: string;
@@ -39,7 +72,35 @@ const DrawerAvatar: React.FC<{
 };
 
 export const CoreTeamDrawer: React.FC = () => {
-  const { coreTeam, showCoreTeamPanel, setShowCoreTeamPanel } = useHackathon();
+  const { coreTeam, customTeamSections, showCoreTeamPanel, setShowCoreTeamPanel } = useHackathon();
+
+  const customCommittees = useMemo(() => {
+    const ordered: CustomTeamSection[] = [...customTeamSections].sort((a, b) => a.order - b.order);
+    const seen = new Set(ordered.map(s => s.name.trim().toLowerCase()));
+
+    coreTeam.forEach((m) => {
+      const cat = (m.category || '').trim();
+      const lower = cat.toLowerCase();
+      if (cat && !BUILT_IN_LOWER.has(lower) && !seen.has(lower)) {
+        seen.add(lower);
+        ordered.push({
+          id: `auto-${lower}`,
+          name: cat,
+          accentColor: (['magenta', 'cyan', 'emerald', 'amber'] as const)[ordered.length % 4],
+          order: ordered.length + 1,
+        });
+      }
+    });
+
+    return ordered
+      .map(sec => ({
+        section: sec,
+        members: coreTeam
+          .filter(m => (m.category || '').trim().toLowerCase() === sec.name.trim().toLowerCase())
+          .sort((a, b) => a.order - b.order),
+      }))
+      .filter(group => group.members.length > 0);
+  }, [coreTeam, customTeamSections]);
 
   if (!showCoreTeamPanel) return null;
 
@@ -131,6 +192,61 @@ export const CoreTeamDrawer: React.FC = () => {
                 ))}
               </div>
             </div>
+
+            {/* Custom Committee Sections */}
+            {customCommittees.map(({ section, members }) => {
+              const style = DRAWER_ACCENTS[section.accentColor || 'cyan'];
+              return (
+                <div key={section.id}>
+                  <div className="flex items-center justify-between gap-2 mb-3">
+                    <div className="flex items-center gap-2">
+                      <Layers className={`w-4 h-4 ${style.text}`} />
+                      <div>
+                        <h3 className={`font-tech text-sm font-bold uppercase tracking-wider ${style.text}`}>
+                          {section.name}
+                        </h3>
+                        {section.description && (
+                          <p className="text-[11px] text-[#9DB0D0]">{section.description}</p>
+                        )}
+                      </div>
+                    </div>
+                    <span className="text-[10px] font-mono text-[#9DB0D0]">
+                      {members.length} {members.length === 1 ? 'member' : 'members'}
+                    </span>
+                  </div>
+                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5">
+                    {members.map(member => (
+                      <div
+                        key={member.id}
+                        className={`p-3 rounded-xl bg-[#0C1630] border ${style.border} ${style.hoverBorder} transition-colors flex flex-col items-center text-center`}
+                      >
+                        <DrawerAvatar
+                          photoUrl={member.photoUrl}
+                          name={member.name}
+                          size="sm"
+                          textColor={style.text}
+                          borderColor={style.avatarBorder}
+                        />
+                        <div className="font-medium text-white text-xs mt-2 line-clamp-1">{member.name}</div>
+                        <div className="text-[11px] text-[#9DB0D0] mt-0.5">{member.role}</div>
+                        {member.email && (
+                          <div className="text-[10px] text-[#35E0FF] truncate mt-1.5 font-mono w-full">{member.email}</div>
+                        )}
+                        {member.phone && member.showPhonePublicly && (
+                          <a
+                            href={`tel:${member.phone.replace(/\s+/g, '')}`}
+                            className="inline-flex items-center gap-1 text-[10px] text-amber-300 hover:text-white mt-1 font-mono"
+                          >
+                            <Phone className="w-2.5 h-2.5 text-[#FF8A2A]" />
+                            <span>{member.phone}</span>
+                          </a>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              );
+            })}
 
             {/* Section: Helpline Contacts */}
             <div>

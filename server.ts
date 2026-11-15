@@ -28,6 +28,7 @@ const VALID_CONTENT_SECTIONS = [
   'faqs',
   'announcements',
   'core_team_index',
+  'team_sections',
   'deleted_teams',
 ] as const;
 type ContentSection = (typeof VALID_CONTENT_SECTIONS)[number];
@@ -830,6 +831,7 @@ app.get('/api/sync/all', (_req: Request, res: Response) => {
   const faqs = readOptionalJsonFile<{ section: string; items: any[]; updatedAt: string }>(getContentFilePath('faqs'));
   const announcementsSection = readOptionalJsonFile<{ section: string; items: any[]; updatedAt: string }>(getContentFilePath('announcements'));
   const coreTeamIndex = readOptionalJsonFile<{ section: string; items: any[]; updatedAt: string }>(getContentFilePath('core_team_index'));
+  const teamSections = readOptionalJsonFile<{ section: string; items: any[]; updatedAt: string }>(getContentFilePath('team_sections'));
   const deletedTeamsSection = readOptionalJsonFile<{ section: string; items: any[]; updatedAt: string }>(getContentFilePath('deleted_teams'));
 
   return res.json({
@@ -847,6 +849,7 @@ app.get('/api/sync/all', (_req: Request, res: Response) => {
     faqs,
     announcementsSection,
     coreTeamIndex,
+    teamSections,
     deletedTeamsSection,
   });
 });
@@ -858,6 +861,7 @@ app.post('/api/sync/push-all', (req: Request, res: Response) => {
     config,
     announcements,
     coreTeam,
+    teamSections,
     rules,
     schedule,
     tracks,
@@ -877,6 +881,9 @@ app.post('/api/sync/push-all', (req: Request, res: Response) => {
   if (Array.isArray(coreTeam)) {
     writeJsonFile(CORE_TEAM_FILE, coreTeam);
     writeJsonFile(getContentFilePath('core_team_index'), { section: 'core_team_index', items: coreTeam.map((m: any) => m.id), updatedAt: nowIso });
+  }
+  if (Array.isArray(teamSections)) {
+    writeJsonFile(getContentFilePath('team_sections'), { section: 'team_sections', items: teamSections, updatedAt: nowIso });
   }
   if (Array.isArray(rules)) {
     writeJsonFile(getContentFilePath('rules'), { section: 'rules', items: rules, updatedAt: nowIso });

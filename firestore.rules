@@ -10,6 +10,7 @@ service cloud.firestore {
         'faqs',
         'announcements',
         'core_team_index',
+        'team_sections',
         'deleted_teams'
       ];
     }
