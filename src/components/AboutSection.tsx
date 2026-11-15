@@ -8,7 +8,8 @@ import hackathonStageImg from '../assets/images/ideation_hackathon_stage_1791994
 gsap.registerPlugin(ScrollTrigger);
 
 export const AboutSection: React.FC = () => {
-  const { eventConfig } = useHackathon();
+  const { eventConfig, tracks } = useHackathon();
+  const activeTrackCount = tracks.filter((t) => t.active).length || tracks.length;
   const sectionRef = useRef<HTMLElement>(null);
   const headerRef = useRef<HTMLDivElement>(null);
   const imageCardRef = useRef<HTMLDivElement>(null);
@@ -188,7 +189,7 @@ export const AboutSection: React.FC = () => {
         >
           <div className="text-center p-3">
             <div className="text-3xl sm:text-4xl font-extrabold font-mono text-[#35E0FF] tabular-nums">
-              ₹1,00,000
+              ₹{eventConfig.prizePoolAmount.toLocaleString('en-IN')}
             </div>
             <div className="text-xs font-tech uppercase tracking-wider text-[#9DB0D0] mt-1 font-semibold">
               Guaranteed Cash Pool
@@ -206,7 +207,7 @@ export const AboutSection: React.FC = () => {
 
           <div className="text-center p-3 border-l border-[#78AAFF]/15">
             <div className="text-3xl sm:text-4xl font-extrabold font-mono text-[#FF4FD8] tabular-nums">
-              6
+              {activeTrackCount}
             </div>
             <div className="text-xs font-tech uppercase tracking-wider text-[#9DB0D0] mt-1 font-semibold">
               Specialized Tracks
@@ -215,7 +216,7 @@ export const AboutSection: React.FC = () => {
 
           <div className="text-center p-3 border-l border-[#78AAFF]/15">
             <div className="text-3xl sm:text-4xl font-extrabold font-mono text-amber-300 tabular-nums">
-              120
+              {eventConfig.maxTeamsLimit}
             </div>
             <div className="text-xs font-tech uppercase tracking-wider text-[#9DB0D0] mt-1 font-semibold">
               Max Team Capacity

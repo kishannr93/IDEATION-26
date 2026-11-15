@@ -71,6 +71,9 @@ export const AdminPanel: React.FC = () => {
     exportTeamsToCSV,
     exportTeamsToSQL,
     resetAllData,
+    syncAllToCloud,
+    isSyncingAll,
+    deleteTeam,
     setActiveView,
     navigateTo,
     schedule,
@@ -403,6 +406,59 @@ export const AdminPanel: React.FC = () => {
   const [filterPayment, setFilterPayment] = useState('All');
   const [filterCourse, setFilterCourse] = useState('All');
   const [selectedTeamModal, setSelectedTeamModal] = useState<RegisteredTeam | null>(null);
+  const [teamToDelete, setTeamToDelete] = useState<RegisteredTeam | null>(null);
+  const [isDeletingTeam, setIsDeletingTeam] = useState(false);
+  const [deleteTeamError, setDeleteTeamError] = useState<string | null>(null);
+  const [syncAllFeedback, setSyncAllFeedback] = useState<{ text: string; success: boolean } | null>(null);
+  const [confirmDialog, setConfirmDialog] = useState<{
+    title: string;
+    message: string;
+    confirmLabel: string;
+    onConfirm: () => void;
+  } | null>(null);
+
+  const handleSyncAllNow = async () => {
+    setSyncAllFeedback(null);
+    try {
+      const res = await syncAllToCloud();
+      if (res.success) {
+        setSyncAllFeedback({
+          text: `All rules, schedule, announcements, links, and ${registeredTeams.length} teams synced live across every URL and device.`,
+          success: true,
+        });
+      } else {
+        setSyncAllFeedback({
+          text: 'Sync completed locally, but cloud bridge reported an issue. Check connection and try again.',
+          success: false,
+        });
+      }
+    } catch {
+      setSyncAllFeedback({
+        text: 'Could not sync data to cloud right now. Please try again.',
+        success: false,
+      });
+    }
+    setTimeout(() => setSyncAllFeedback(null), 5000);
+  };
+
+  const handleConfirmDeleteTeam = async () => {
+    if (!teamToDelete) return;
+    setIsDeletingTeam(true);
+    setDeleteTeamError(null);
+    const targetId = teamToDelete.id;
+    const res = await deleteTeam(targetId);
+    setIsDeletingTeam(false);
+    if (res.success) {
+      knownTeamsMapRef.current?.delete(targetId);
+      setRealtimeToasts((prev) => prev.filter((t) => t.teamId !== targetId));
+      if (selectedTeamModal?.id === targetId) {
+        setSelectedTeamModal(null);
+      }
+      setTeamToDelete(null);
+    } else {
+      setDeleteTeamError(res.error || 'Failed to delete team. Please try again.');
+    }
+  };
 
   // New announcement form
   const [newNews, setNewNews] = useState({
@@ -867,6 +923,18 @@ export const AdminPanel: React.FC = () => {
                   )}
                 </button>
 
+                {/* Global Sync All Data & Links Button */}
+                <button
+                  type="button"
+                  onClick={handleSyncAllNow}
+                  disabled={isSyncingAll}
+                  className="flex items-center gap-1.5 px-3 py-2 text-xs font-semibold text-emerald-300 bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/40 rounded-xl transition-all cursor-pointer disabled:opacity-50"
+                  title="Force sync all rules, schedule, announcements, links, and registrations across all devices and URLs"
+                >
+                  <RefreshCw className={`w-3.5 h-3.5 ${isSyncingAll ? 'animate-spin' : ''}`} />
+                  <span className="hidden lg:inline">{isSyncingAll ? 'Syncing All...' : 'Sync All Data & Links'}</span>
+                </button>
+
                 {/* Download PPT Template Button */}
                 <button
                   onClick={handleAdminDownloadTemplate}
@@ -1001,6 +1069,32 @@ export const AdminPanel: React.FC = () => {
             )}
           </div>
         </div>
+
+        {syncAllFeedback && (
+          <div
+            className={`mb-6 p-3.5 rounded-2xl border text-xs flex items-center justify-between gap-3 animate-in fade-in slide-in-from-top-2 ${
+              syncAllFeedback.success
+                ? 'bg-emerald-500/15 border-emerald-500/40 text-emerald-200'
+                : 'bg-rose-500/15 border-rose-500/40 text-rose-200'
+            }`}
+          >
+            <div className="flex items-center gap-2">
+              {syncAllFeedback.success ? (
+                <CheckCircle className="w-4 h-4 text-emerald-400 shrink-0" />
+              ) : (
+                <AlertCircle className="w-4 h-4 text-rose-400 shrink-0" />
+              )}
+              <span>{syncAllFeedback.text}</span>
+            </div>
+            <button
+              type="button"
+              onClick={() => setSyncAllFeedback(null)}
+              className="text-[#9DB0D0] hover:text-white p-1 cursor-pointer"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+        )}
 
         {/* ADMIN AUTHENTICATION LOGIN CARD */}
         {!isAdminAuthenticated ? (
@@ -1589,12 +1683,26 @@ export const AdminPanel: React.FC = () => {
                               </button>
                             </td>
                             <td className="py-3 px-4 text-right">
-                              <button
-                                onClick={() => setSelectedTeamModal(team)}
-                                className="px-2.5 py-1 text-xs text-[#35E0FF] bg-[#132247] hover:bg-[#1a2d5c] rounded-lg transition-colors"
-                              >
-                                View Details
-                              </button>
+                              <div className="inline-flex items-center justify-end gap-1.5">
+                                <button
+                                  type="button"
+                                  onClick={() => setSelectedTeamModal(team)}
+                                  className="px-2.5 py-1 text-xs text-[#35E0FF] bg-[#132247] hover:bg-[#1a2d5c] rounded-lg transition-colors cursor-pointer"
+                                >
+                                  View Details
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setDeleteTeamError(null);
+                                    setTeamToDelete(team);
+                                  }}
+                                  className="p-1.5 text-rose-400 hover:text-white bg-rose-500/10 hover:bg-rose-500/30 border border-rose-500/20 rounded-lg transition-colors cursor-pointer"
+                                  title={`Delete team ${team.teamName}`}
+                                >
+                                  <Trash2 className="w-3.5 h-3.5" />
+                                </button>
+                              </div>
                             </td>
                           </tr>
                         ))
@@ -1617,7 +1725,7 @@ export const AdminPanel: React.FC = () => {
                     <CreditCard className="w-10 h-10 text-[#78AAFF]/40 mx-auto mb-3" />
                     <h4 className="text-base font-bold text-white">No payment verifications pending</h4>
                     <p className="text-xs text-[#9DB0D0] mt-1 max-w-md mx-auto">
-                      When participants submit their ₹100 registration fee with UPI transaction IDs and receipts, they will appear here for verification.
+                      When participants submit their ₹{eventConfig.entryFee} registration fee with UPI transaction IDs and receipts, they will appear here for verification.
                     </p>
                   </div>
                 ) : (
@@ -2304,6 +2412,66 @@ export const AdminPanel: React.FC = () => {
                         className="w-full px-3 py-2 bg-[#081024] border border-[#78AAFF]/20 rounded-xl text-white focus:outline-none focus:border-[#35E0FF]"
                       />
                     </div>
+
+                    <div>
+                      <label className="block text-[#9DB0D0] mb-1">UPI Payee Name</label>
+                      <input
+                        type="text"
+                        value={eventConfig.upiPayeeName || ''}
+                        onChange={(e) => updateEventConfig({ upiPayeeName: e.target.value })}
+                        className="w-full px-3 py-2 bg-[#081024] border border-[#78AAFF]/20 rounded-xl text-white focus:outline-none focus:border-[#35E0FF]"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-[#9DB0D0] mb-1">Prize Pool Amount (₹)</label>
+                      <input
+                        type="number"
+                        value={eventConfig.prizePoolAmount}
+                        onChange={(e) => updateEventConfig({ prizePoolAmount: Number(e.target.value) })}
+                        className="w-full px-3 py-2 bg-[#081024] border border-[#78AAFF]/20 rounded-xl text-white focus:outline-none focus:border-[#35E0FF]"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-[#9DB0D0] mb-1">Max Team Capacity</label>
+                      <input
+                        type="number"
+                        value={eventConfig.maxTeamsLimit}
+                        onChange={(e) => updateEventConfig({ maxTeamsLimit: Number(e.target.value) })}
+                        className="w-full px-3 py-2 bg-[#081024] border border-[#78AAFF]/20 rounded-xl text-white focus:outline-none focus:border-[#35E0FF]"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-[#9DB0D0] mb-1">Event Venue</label>
+                      <input
+                        type="text"
+                        value={eventConfig.venue || ''}
+                        onChange={(e) => updateEventConfig({ venue: e.target.value })}
+                        className="w-full px-3 py-2 bg-[#081024] border border-[#78AAFF]/20 rounded-xl text-white focus:outline-none focus:border-[#35E0FF]"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-[#9DB0D0] mb-1">Team Size Policy</label>
+                      <input
+                        type="text"
+                        value={eventConfig.teamSize || ''}
+                        onChange={(e) => updateEventConfig({ teamSize: e.target.value })}
+                        className="w-full px-3 py-2 bg-[#081024] border border-[#78AAFF]/20 rounded-xl text-white focus:outline-none focus:border-[#35E0FF]"
+                      />
+                    </div>
+
+                    <div className="sm:col-span-2">
+                      <label className="block text-[#9DB0D0] mb-1">Eligibility Description</label>
+                      <input
+                        type="text"
+                        value={eventConfig.eligibility || ''}
+                        onChange={(e) => updateEventConfig({ eligibility: e.target.value })}
+                        className="w-full px-3 py-2 bg-[#081024] border border-[#78AAFF]/20 rounded-xl text-white focus:outline-none focus:border-[#35E0FF]"
+                      />
+                    </div>
                   </div>
 
                   <div className="pt-3 border-t border-[#78AAFF]/15 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
@@ -2329,7 +2497,18 @@ export const AdminPanel: React.FC = () => {
                       </label>
                     </div>
 
-                    <span className="text-[11px] font-mono text-emerald-400">All edits sync live across site</span>
+                    <div className="flex items-center gap-3">
+                      <span className="text-[11px] font-mono text-emerald-400">Auto-syncing live</span>
+                      <button
+                        type="button"
+                        onClick={handleSyncAllNow}
+                        disabled={isSyncingAll}
+                        className="px-3.5 py-1.5 rounded-xl text-xs font-bold text-white bg-gradient-to-r from-emerald-500 to-[#35E0FF] hover:brightness-110 flex items-center gap-1.5 cursor-pointer disabled:opacity-50 shadow-md"
+                      >
+                        <RefreshCw className={`w-3.5 h-3.5 ${isSyncingAll ? 'animate-spin' : ''}`} />
+                        <span>{isSyncingAll ? 'Syncing Live...' : 'Push & Sync Everything Live Now'}</span>
+                      </button>
+                    </div>
                   </div>
                 </div>
 
@@ -2832,11 +3011,14 @@ export const AdminPanel: React.FC = () => {
                     </h3>
                     <button
                       type="button"
-                      onClick={() => {
-                        if (window.confirm('Reset all schedule events back to default?')) {
-                          resetScheduleToDefault();
-                        }
-                      }}
+                      onClick={() =>
+                        setConfirmDialog({
+                          title: 'Reset Schedule to Default?',
+                          message: 'All custom schedule events will be replaced with the default 24-hour flow across all devices.',
+                          confirmLabel: 'Reset Schedule',
+                          onConfirm: () => resetScheduleToDefault(),
+                        })
+                      }
                       className="px-3 py-1.5 rounded-lg text-xs font-mono text-amber-300 bg-amber-500/10 border border-amber-500/30 hover:bg-amber-500/20 flex items-center gap-1.5 cursor-pointer"
                     >
                       <RotateCcw className="w-3.5 h-3.5" />
@@ -3092,12 +3274,15 @@ export const AdminPanel: React.FC = () => {
                                 <Edit className="w-4 h-4" />
                               </button>
                               <button
-                                onClick={() => {
-                                  if (window.confirm(`Delete event "${item.title}"?`)) {
-                                    deleteScheduleEvent(item.id);
-                                  }
-                                }}
-                                className="p-1.5 text-rose-400 hover:text-white"
+                                onClick={() =>
+                                  setConfirmDialog({
+                                    title: 'Delete Schedule Event?',
+                                    message: `Remove "${item.title}" from the live event timeline across all devices?`,
+                                    confirmLabel: 'Delete Event',
+                                    onConfirm: () => deleteScheduleEvent(item.id),
+                                  })
+                                }
+                                className="p-1.5 text-rose-400 hover:text-white cursor-pointer"
                                 title="Delete Event"
                               >
                                 <Trash2 className="w-4 h-4" />
@@ -3123,11 +3308,14 @@ export const AdminPanel: React.FC = () => {
                     </h3>
                     <button
                       type="button"
-                      onClick={() => {
-                        if (window.confirm('Reset all rules back to default event guidelines?')) {
-                          resetRulesToDefault();
-                        }
-                      }}
+                      onClick={() =>
+                        setConfirmDialog({
+                          title: 'Reset Rules to Default?',
+                          message: 'All custom rules will be replaced with the default event guidelines across all devices.',
+                          confirmLabel: 'Reset Rules',
+                          onConfirm: () => resetRulesToDefault(),
+                        })
+                      }
                       className="px-3 py-1.5 rounded-lg text-xs font-mono text-amber-300 bg-amber-500/10 border border-amber-500/30 hover:bg-amber-500/20 flex items-center gap-1.5 cursor-pointer"
                     >
                       <RotateCcw className="w-3.5 h-3.5" />
@@ -3310,12 +3498,15 @@ export const AdminPanel: React.FC = () => {
                                 <Edit className="w-4 h-4" />
                               </button>
                               <button
-                                onClick={() => {
-                                  if (window.confirm(`Delete rule "${rule.title}"?`)) {
-                                    deleteRule(rule.id);
-                                  }
-                                }}
-                                className="p-1.5 text-rose-400 hover:text-white"
+                                onClick={() =>
+                                  setConfirmDialog({
+                                    title: 'Delete Rule?',
+                                    message: `Remove rule "${rule.title}" from the live website across all devices?`,
+                                    confirmLabel: 'Delete Rule',
+                                    onConfirm: () => deleteRule(rule.id),
+                                  })
+                                }
+                                className="p-1.5 text-rose-400 hover:text-white cursor-pointer"
                                 title="Delete Rule"
                               >
                                 <Trash2 className="w-4 h-4" />
@@ -3387,15 +3578,28 @@ export const AdminPanel: React.FC = () => {
                   </div>
                 )}
 
-                <div className="pt-4 border-t border-[#78AAFF]/20 flex items-center justify-between">
+                <div className="pt-4 border-t border-[#78AAFF]/20 flex flex-wrap items-center justify-between gap-3">
                   <span className="text-[11px] text-[#9DB0D0]">Official IDEATION 2026 Check-in Verification</span>
-                  <button
-                    onClick={() => window.print()}
-                    className="px-4 py-2 rounded-xl text-xs font-semibold text-white bg-[#132247] hover:bg-[#1a2d5c] border border-[#35E0FF]/30 flex items-center gap-2 transition-colors cursor-pointer"
-                  >
-                    <Printer className="w-4 h-4 text-[#35E0FF]" />
-                    <span>Print Entry Pass</span>
-                  </button>
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setDeleteTeamError(null);
+                        setTeamToDelete(selectedTeamModal);
+                      }}
+                      className="px-4 py-2 rounded-xl text-xs font-semibold text-rose-300 hover:text-white bg-rose-500/15 hover:bg-rose-500/30 border border-rose-500/40 flex items-center gap-1.5 transition-colors cursor-pointer"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                      <span>Delete Team</span>
+                    </button>
+                    <button
+                      onClick={() => window.print()}
+                      className="px-4 py-2 rounded-xl text-xs font-semibold text-white bg-[#132247] hover:bg-[#1a2d5c] border border-[#35E0FF]/30 flex items-center gap-2 transition-colors cursor-pointer"
+                    >
+                      <Printer className="w-4 h-4 text-[#35E0FF]" />
+                      <span>Print Entry Pass</span>
+                    </button>
+                  </div>
                 </div>
               </div>
             </div>
@@ -3609,6 +3813,121 @@ export const AdminPanel: React.FC = () => {
                   </button>
                 </div>
               </form>
+            </div>
+          </div>
+        )}
+
+        {/* DELETE REGISTERED TEAM CONFIRMATION MODAL */}
+        {teamToDelete && (
+          <div
+            className="fixed inset-0 z-[60] bg-black/80 backdrop-blur-md flex items-center justify-center p-4"
+            onClick={() => !isDeletingTeam && setTeamToDelete(null)}
+          >
+            <div
+              className="w-full max-w-md bg-[#081024] border border-rose-500/50 rounded-3xl p-6 shadow-[0_0_50px_rgba(244,63,94,0.25)] animate-in fade-in zoom-in-95"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="flex items-start gap-3 pb-4 border-b border-[#78AAFF]/20">
+                <div className="w-10 h-10 rounded-xl bg-rose-500/15 border border-rose-500/40 text-rose-400 flex items-center justify-center shrink-0">
+                  <Trash2 className="w-5 h-5" />
+                </div>
+                <div>
+                  <span className="text-[10px] font-mono uppercase tracking-wider text-rose-400 font-bold">
+                    Permanent Team Deletion
+                  </span>
+                  <h3 className="text-lg font-bold font-display text-white">
+                    Delete Registered Team?
+                  </h3>
+                </div>
+              </div>
+
+              <div className="py-4 space-y-3 text-xs">
+                <p className="text-[#9DB0D0] leading-relaxed">
+                  Are you sure you want to permanently remove this team from registrations, cloud database, and linked sheets? This action syncs across all devices and cannot be undone.
+                </p>
+
+                <div className="p-3.5 rounded-xl bg-[#0C1630] border border-[#78AAFF]/20 space-y-1">
+                  <div className="flex items-center justify-between">
+                    <span className="font-mono font-bold text-[#35E0FF]">{teamToDelete.id}</span>
+                    <span className="font-mono text-[11px] text-[#9DB0D0]">
+                      {teamToDelete.members.length} members
+                    </span>
+                  </div>
+                  <div className="font-bold text-white text-sm">{teamToDelete.teamName}</div>
+                  <div className="text-[11px] text-[#9DB0D0]">{teamToDelete.college}</div>
+                </div>
+
+                {deleteTeamError && (
+                  <div className="p-3 rounded-xl bg-rose-500/15 border border-rose-500/30 text-rose-300 flex items-center gap-2">
+                    <AlertCircle className="w-4 h-4 shrink-0" />
+                    <span>{deleteTeamError}</span>
+                  </div>
+                )}
+              </div>
+
+              <div className="pt-3 border-t border-[#78AAFF]/20 flex items-center justify-end gap-2.5">
+                <button
+                  type="button"
+                  disabled={isDeletingTeam}
+                  onClick={() => setTeamToDelete(null)}
+                  className="px-4 py-2 rounded-xl text-xs font-semibold text-[#9DB0D0] hover:text-white bg-[#0C1630] border border-[#78AAFF]/20 cursor-pointer disabled:opacity-50"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  disabled={isDeletingTeam}
+                  onClick={handleConfirmDeleteTeam}
+                  className="px-4 py-2 rounded-xl text-xs font-bold text-white bg-rose-600 hover:bg-rose-500 shadow-[0_0_20px_rgba(244,63,94,0.4)] flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                  <span>{isDeletingTeam ? 'Deleting...' : 'Delete Permanently'}</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* IN-APP CONFIRMATION DIALOG (RULES / SCHEDULE / RESET) */}
+        {confirmDialog && (
+          <div
+            className="fixed inset-0 z-[60] bg-black/80 backdrop-blur-md flex items-center justify-center p-4"
+            onClick={() => setConfirmDialog(null)}
+          >
+            <div
+              className="w-full max-w-md bg-[#081024] border border-amber-500/40 rounded-3xl p-6 shadow-[0_0_50px_rgba(245,158,11,0.2)] animate-in fade-in zoom-in-95"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="flex items-start gap-3 pb-3 border-b border-[#78AAFF]/20">
+                <div className="w-10 h-10 rounded-xl bg-amber-500/15 border border-amber-500/40 text-amber-400 flex items-center justify-center shrink-0">
+                  <AlertCircle className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-lg font-bold font-display text-white">{confirmDialog.title}</h3>
+                </div>
+              </div>
+
+              <p className="py-4 text-xs text-[#9DB0D0] leading-relaxed">{confirmDialog.message}</p>
+
+              <div className="pt-3 border-t border-[#78AAFF]/20 flex items-center justify-end gap-2.5">
+                <button
+                  type="button"
+                  onClick={() => setConfirmDialog(null)}
+                  className="px-4 py-2 rounded-xl text-xs font-semibold text-[#9DB0D0] hover:text-white bg-[#0C1630] border border-[#78AAFF]/20 cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    confirmDialog.onConfirm();
+                    setConfirmDialog(null);
+                  }}
+                  className="px-4 py-2 rounded-xl text-xs font-bold text-white bg-gradient-to-r from-[#FF8A2A] to-rose-600 hover:brightness-110 cursor-pointer"
+                >
+                  {confirmDialog.confirmLabel}
+                </button>
+              </div>
             </div>
           </div>
         )}

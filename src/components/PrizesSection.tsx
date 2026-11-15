@@ -124,7 +124,7 @@ export const PrizesSection: React.FC = () => {
         <div ref={headerRef} className="text-center max-w-3xl mx-auto mb-16 will-change-transform">
           <div className="inline-flex items-center gap-2 text-xs font-mono uppercase tracking-widest text-amber-300 mb-2">
             <Trophy className="w-3.5 h-3.5 text-[#FFC83D]" />
-            <span>₹1 Lakh Guaranteed Prize Pool</span>
+            <span>₹{eventConfig.prizePoolAmount.toLocaleString('en-IN')} Guaranteed Prize Pool</span>
           </div>
           <h2 className="text-3xl sm:text-5xl font-extrabold font-display text-white tracking-tight">
             Prizes, Awards & <span className="text-transparent bg-clip-text bg-gradient-to-r from-[#FFC83D] via-[#FF8A2A] to-white">Distinctions</span>

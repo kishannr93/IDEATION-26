@@ -64,6 +64,7 @@ export const ParticipantDashboard: React.FC = () => {
 
   // PPT Template Download State
   const [isDownloadingTemplate, setIsDownloadingTemplate] = useState(false);
+  const [templateError, setTemplateError] = useState<string | null>(null);
   const [showGuidelinesModal, setShowGuidelinesModal] = useState(false);
 
   // PPT Submission Modal State
@@ -158,8 +159,15 @@ export const ParticipantDashboard: React.FC = () => {
 
   // Download PPT template
   const handleDownloadPptTemplate = async () => {
+    setTemplateError(null);
     if (eventConfig?.officialPptLink) {
-      window.open(eventConfig.officialPptLink, '_blank', 'noopener,noreferrer');
+      const a = document.createElement('a');
+      a.href = eventConfig.officialPptLink;
+      a.target = '_blank';
+      a.rel = 'noopener noreferrer';
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
       return;
     }
     try {
@@ -176,7 +184,7 @@ export const ParticipantDashboard: React.FC = () => {
       });
     } catch (err) {
       console.error('PPT generation error:', err);
-      alert('Could not generate PPT file. Please check your browser permissions.');
+      setTemplateError('Could not generate PPT file. Please try again.');
     } finally {
       setIsDownloadingTemplate(false);
     }
@@ -312,6 +320,15 @@ export const ParticipantDashboard: React.FC = () => {
           </div>
         </div>
 
+        {templateError && (
+          <div className="mb-6 p-3 rounded-xl bg-rose-500/15 border border-rose-500/30 text-rose-300 text-xs flex items-center justify-between gap-2">
+            <span>{templateError}</span>
+            <button type="button" onClick={() => setTemplateError(null)} className="text-rose-200 hover:text-white cursor-pointer">
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+        )}
+
         {!currentTeamSession ? (
           /* LOGIN FORM */
           <div className="max-w-md mx-auto">
@@ -428,7 +445,7 @@ export const ParticipantDashboard: React.FC = () => {
                   className="w-full py-2.5 rounded-xl font-bold text-xs text-white bg-gradient-to-r from-[#0052FF] to-[#35E0FF] shadow-[0_0_20px_rgba(53,224,255,0.25)] hover:brightness-110 active:scale-95 transition-all flex items-center justify-center gap-2 cursor-pointer"
                 >
                   <UserPlus className="w-4 h-4" />
-                  <span>Register New Team (₹100)</span>
+                  <span>Register New Team (₹{eventConfig.entryFee})</span>
                 </button>
               </div>
 
@@ -491,9 +508,87 @@ export const ParticipantDashboard: React.FC = () => {
                 <div>
                   <div className="font-bold text-white text-sm">Official Payment Approval Confirmed!</div>
                   <p className="text-xs text-emerald-200/90 mt-1 leading-relaxed">
-                    The organizing committee has verified and approved your UPI transaction ({currentTeamSession.paymentTransactionId}). Your official entry pass is confirmed and activated for physical check-in at the BIET Main Auditorium on 18 November 2026.
+                    The organizing committee has verified and approved your UPI transaction ({currentTeamSession.paymentTransactionId}). Your official entry pass is confirmed and activated for physical check-in at {eventConfig.venue || 'BIET Main Auditorium'} ({eventConfig.dates}).
                   </p>
                 </div>
+              </div>
+            )}
+
+            {/* Live Resource Links & Latest Announcements */}
+            {(eventConfig.whatsappGroupLink || eventConfig.problemStatementsLink || eventConfig.brochurePdfLink || announcements.length > 0) && (
+              <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+                {(eventConfig.whatsappGroupLink || eventConfig.problemStatementsLink || eventConfig.brochurePdfLink) && (
+                  <div className="lg:col-span-5 p-5 rounded-2xl bg-[#0C1630] border border-[#78AAFF]/20 space-y-3">
+                    <div className="flex items-center gap-2 text-xs font-mono uppercase tracking-wider text-[#35E0FF] font-bold">
+                      <Globe className="w-4 h-4" />
+                      <span>Official Event Resources & Links</span>
+                    </div>
+                    <div className="space-y-2">
+                      {eventConfig.whatsappGroupLink && (
+                        <a
+                          href={eventConfig.whatsappGroupLink}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="w-full p-2.5 rounded-xl bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/30 text-xs font-semibold text-emerald-300 flex items-center justify-between transition-colors"
+                        >
+                          <span>Join WhatsApp Participant Group</span>
+                          <ExternalLink className="w-3.5 h-3.5" />
+                        </a>
+                      )}
+                      {eventConfig.problemStatementsLink && (
+                        <a
+                          href={eventConfig.problemStatementsLink}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="w-full p-2.5 rounded-xl bg-[#081024] hover:bg-[#132247] border border-[#78AAFF]/20 text-xs font-semibold text-white flex items-center justify-between transition-colors"
+                        >
+                          <span>Problem Statements Repository</span>
+                          <ExternalLink className="w-3.5 h-3.5 text-[#35E0FF]" />
+                        </a>
+                      )}
+                      {eventConfig.brochurePdfLink && (
+                        <a
+                          href={eventConfig.brochurePdfLink}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="w-full p-2.5 rounded-xl bg-[#081024] hover:bg-[#132247] border border-[#78AAFF]/20 text-xs font-semibold text-white flex items-center justify-between transition-colors"
+                        >
+                          <span>Official Rulebook & Brochure</span>
+                          <ExternalLink className="w-3.5 h-3.5 text-[#35E0FF]" />
+                        </a>
+                      )}
+                    </div>
+                  </div>
+                )}
+
+                {announcements.length > 0 && (
+                  <div className={`${(eventConfig.whatsappGroupLink || eventConfig.problemStatementsLink || eventConfig.brochurePdfLink) ? 'lg:col-span-7' : 'lg:col-span-12'} p-5 rounded-2xl bg-[#0C1630] border border-[#78AAFF]/20 space-y-3`}>
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2 text-xs font-mono uppercase tracking-wider text-[#FF8A2A] font-bold">
+                        <Bell className="w-4 h-4" />
+                        <span>Latest Official Announcements</span>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => navigateTo('home', 'news')}
+                        className="text-[11px] font-mono text-[#35E0FF] hover:underline cursor-pointer"
+                      >
+                        View All
+                      </button>
+                    </div>
+                    <div className="space-y-2">
+                      {announcements.slice(0, 2).map((item) => (
+                        <div key={item.id} className="p-3 rounded-xl bg-[#081024] border border-[#78AAFF]/15 text-xs">
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="font-bold text-white">{item.title}</span>
+                            <span className="text-[10px] font-mono text-[#35E0FF] shrink-0">{item.category}</span>
+                          </div>
+                          <p className="text-[11px] text-[#9DB0D0] mt-1 line-clamp-2">{item.content}</p>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
               </div>
             )}
 
@@ -837,8 +932,8 @@ export const ParticipantDashboard: React.FC = () => {
                       <span className="text-white">{currentTeamSession.backupTrack}</span>
                     </div>
                     <div className="flex justify-between py-1">
-                      <span className="text-[#9DB0D0]">Reporting Date</span>
-                      <span className="text-white font-mono">18 Nov 2026, 08:00 AM</span>
+                      <span className="text-[#9DB0D0]">Event Dates</span>
+                      <span className="text-white font-mono">{eventConfig.dates}</span>
                     </div>
                   </div>
                 </div>

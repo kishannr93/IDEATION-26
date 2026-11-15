@@ -2,7 +2,16 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
     function isValidSectionId(sectionId) {
-      return sectionId in ['rules', 'schedule', 'tracks', 'prizes', 'faqs'];
+      return sectionId in [
+        'rules',
+        'schedule',
+        'tracks',
+        'prizes',
+        'faqs',
+        'announcements',
+        'core_team_index',
+        'deleted_teams'
+      ];
     }
 
     function isValidSiteContent(data) {
@@ -11,7 +20,7 @@ service cloud.firestore {
         && data.section is string
         && isValidSectionId(data.section)
         && data.items is list
-        && data.items.size() <= 200
+        && data.items.size() <= 500
         && data.updatedAt is string
         && data.updatedAt.size() >= 10
         && data.updatedAt.size() <= 64;
@@ -23,7 +32,7 @@ service cloud.firestore {
                     && request.resource.data.teamName is string
                     && request.resource.data.leaderEmail is string;
       allow update: if true;
-      allow delete: if false;
+      allow delete: if true;
     }
     match /site_config/{configId} {
       allow read: if true;

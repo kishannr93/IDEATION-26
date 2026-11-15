@@ -56,7 +56,7 @@ export const LocationSection: React.FC = () => {
             Event <span className="text-transparent bg-clip-text bg-gradient-to-r from-[#35E0FF] via-white to-[#35E0FF]">Location</span>
           </h2>
           <p className="text-sm sm:text-base text-[#9DB0D0] mt-3">
-            Join us live on-campus at BIET Davangere for 36 hours of non-stop innovation, building, and mentorship.
+            Join us live on-campus at {eventConfig?.venue || 'BIET Davangere'} for 24 hours of non-stop innovation, building, and mentorship.
           </p>
         </div>
 
@@ -124,7 +124,7 @@ export const LocationSection: React.FC = () => {
                 </div>
                 <div className="text-xs">
                   <div className="font-bold text-white leading-tight">{venueTitle}</div>
-                  <div className="text-[11px] text-[#9DB0D0] mt-0.5">325, Shamanur Road, Davangere, Karnataka 577004</div>
+                  <div className="text-[11px] text-[#9DB0D0] mt-0.5">{fullAddress}</div>
                   <a
                     href={googleMapsUrl}
                     target="_blank"
@@ -160,7 +160,7 @@ export const LocationSection: React.FC = () => {
                 <div className="text-xs text-[#9DB0D0] mt-1 space-y-1">
                   <p className="flex items-start gap-2">
                     <MapPin className="w-4 h-4 text-[#35E0FF] shrink-0 mt-0.5" />
-                    <span>325, Shamanur Rd, BIET Campus, Davangere, Karnataka 577004</span>
+                    <span>{fullAddress}</span>
                   </p>
                   <p className="flex items-center gap-2 pt-1 text-slate-300">
                     <Clock className="w-4 h-4 text-amber-400 shrink-0" />

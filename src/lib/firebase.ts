@@ -268,6 +268,16 @@ export async function updateTeamSubmissionInFirestore(
   }
 }
 
+export async function deleteTeamFromFirestore(teamId: string): Promise<void> {
+  const path = `teams/${teamId}`;
+  try {
+    const teamRef = doc(db, 'teams', teamId);
+    await deleteDoc(teamRef);
+  } catch (err) {
+    logFirestoreWarning(err, OperationType.DELETE, path);
+  }
+}
+
 export async function fetchAllTeamsFromFirestore(): Promise<RegisteredTeam[]> {
   try {
     const colRef = collection(db, 'teams');
@@ -322,8 +332,9 @@ export async function fetchAllTeamsFromFirestore(): Promise<RegisteredTeam[]> {
 }
 
 export function subscribeFirestoreTeams(
-  callback: (teams: RegisteredTeam[]) => void
+  callback: (teams: RegisteredTeam[], fromServer: boolean) => void
 ): Unsubscribe {
+  const path = 'teams';
   const colRef = collection(db, 'teams');
   return onSnapshot(
     colRef,
@@ -370,10 +381,10 @@ export function subscribeFirestoreTeams(
       });
       // Sort newest first
       teams.sort((a, b) => new Date(b.registeredAt).getTime() - new Date(a.registeredAt).getTime());
-      callback(teams);
+      callback(teams, !snapshot.metadata.fromCache);
     },
     (err) => {
-      console.warn('Firestore snapshot error:', err);
+      logFirestoreWarning(err, OperationType.LIST, path);
     }
   );
 }
@@ -532,10 +543,18 @@ export function subscribeFirestoreCoreTeam(
 }
 
 // -----------------------------------------------------------------------------
-// FIRESTORE UNIVERSAL CROSS-DEVICE SYNC FOR RULES, SCHEDULE, TRACKS, PRIZES, FAQS
+// FIRESTORE UNIVERSAL CROSS-DEVICE SYNC FOR ALL CONTENT, LINKS & DELETIONS
 // -----------------------------------------------------------------------------
 
-export type SiteContentSection = 'rules' | 'schedule' | 'tracks' | 'prizes' | 'faqs';
+export type SiteContentSection =
+  | 'rules'
+  | 'schedule'
+  | 'tracks'
+  | 'prizes'
+  | 'faqs'
+  | 'announcements'
+  | 'core_team_index'
+  | 'deleted_teams';
 
 export interface SiteContentDoc<T = unknown> {
   section: SiteContentSection;
@@ -587,5 +606,120 @@ export function subscribeFirestoreSiteContent<T>(
     }
   );
 }
+
+export interface FullFirestoreSnapshot {
+  teams: RegisteredTeam[];
+  config: Partial<EventConfig> | null;
+  coreTeam: CoreTeamMember[];
+  announcements: Announcement[];
+  sections: Partial<Record<SiteContentSection, SiteContentDoc<any>>>;
+}
+
+export async function fetchAllFromFirestore(): Promise<FullFirestoreSnapshot> {
+  const result: FullFirestoreSnapshot = {
+    teams: [],
+    config: null,
+    coreTeam: [],
+    announcements: [],
+    sections: {},
+  };
+
+  try {
+    const [teamsList, configSnap, contentSnap, coreSnap, annSnap] = await Promise.all([
+      fetchAllTeamsFromFirestore(),
+      getDocs(collection(db, 'site_config')).catch((err) => {
+        logFirestoreWarning(err, OperationType.LIST, 'site_config');
+        return null;
+      }),
+      getDocs(collection(db, 'site_content')).catch((err) => {
+        logFirestoreWarning(err, OperationType.LIST, 'site_content');
+        return null;
+      }),
+      getDocs(collection(db, 'core_team')).catch((err) => {
+        logFirestoreWarning(err, OperationType.LIST, 'core_team');
+        return null;
+      }),
+      getDocs(collection(db, 'announcements')).catch((err) => {
+        logFirestoreWarning(err, OperationType.LIST, 'announcements');
+        return null;
+      }),
+    ]);
+
+    result.teams = teamsList.sort(
+      (a, b) => new Date(b.registeredAt).getTime() - new Date(a.registeredAt).getTime()
+    );
+
+    if (configSnap) {
+      configSnap.forEach((docSnap) => {
+        if (docSnap.id === 'event_config') {
+          result.config = docSnap.data() as Partial<EventConfig>;
+        }
+      });
+    }
+
+    if (contentSnap) {
+      contentSnap.forEach((docSnap) => {
+        const data = docSnap.data();
+        const section = docSnap.id as SiteContentSection;
+        if (Array.isArray(data?.items) && typeof data?.updatedAt === 'string') {
+          result.sections[section] = {
+            section,
+            items: data.items,
+            updatedAt: data.updatedAt,
+          };
+        }
+      });
+    }
+
+    if (coreSnap) {
+      const members: CoreTeamMember[] = [];
+      coreSnap.forEach((docSnap) => {
+        const d = docSnap.data();
+        members.push({
+          id: d.id || docSnap.id,
+          name: d.name || '',
+          role: d.role || '',
+          category: d.category || 'Student Co-ordinator',
+          phone: d.phone || undefined,
+          email: d.email || undefined,
+          showPhonePublicly: Boolean(d.showPhonePublicly),
+          order: typeof d.order === 'number' ? d.order : 99,
+          photoUrl: d.photoUrl || undefined,
+        });
+      });
+      members.sort((a, b) => a.order - b.order);
+      result.coreTeam = members;
+    }
+
+    if (annSnap) {
+      const items: Announcement[] = [];
+      annSnap.forEach((docSnap) => {
+        const d = docSnap.data();
+        items.push({
+          id: d.id || docSnap.id,
+          title: d.title || '',
+          content: d.content || '',
+          category: d.category || 'Update',
+          pinned: Boolean(d.pinned),
+          date: d.date || new Date().toISOString(),
+          author: d.author || 'Anveshan Core Team',
+          link: d.link || undefined,
+          linkText: d.linkText || undefined,
+        });
+      });
+      items.sort((a, b) => {
+        if (a.pinned && !b.pinned) return -1;
+        if (!a.pinned && b.pinned) return 1;
+        return new Date(b.date).getTime() - new Date(a.date).getTime();
+      });
+      result.announcements = items;
+    }
+  } catch (err) {
+    logFirestoreWarning(err, OperationType.GET, 'full_sync');
+  }
+
+  return result;
+}
+
 
 

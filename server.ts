@@ -16,10 +16,20 @@ app.use(express.urlencoded({ extended: true, limit: '20mb' }));
 // Central Database Storage Path
 const DATA_DIR = path.resolve(__dirname, 'data');
 const DB_FILE = path.join(DATA_DIR, 'central_database.json');
+const DELETED_TEAMS_FILE = path.join(DATA_DIR, 'deleted_teams.json');
 const CONFIG_FILE = path.join(DATA_DIR, 'event_config.json');
 const ANNOUNCEMENTS_FILE = path.join(DATA_DIR, 'announcements.json');
 const CORE_TEAM_FILE = path.join(DATA_DIR, 'core_team.json');
-const VALID_CONTENT_SECTIONS = ['rules', 'schedule', 'tracks', 'prizes', 'faqs'] as const;
+const VALID_CONTENT_SECTIONS = [
+  'rules',
+  'schedule',
+  'tracks',
+  'prizes',
+  'faqs',
+  'announcements',
+  'core_team_index',
+  'deleted_teams',
+] as const;
 type ContentSection = (typeof VALID_CONTENT_SECTIONS)[number];
 
 const getContentFilePath = (section: ContentSection) => path.join(DATA_DIR, `content_${section}.json`);
@@ -404,8 +414,15 @@ app.post('/api/teams', (req: Request, res: Response) => {
     }
   }
 
-  // Generate Team ID
-  const nextNumber = teams.length + 1;
+  // Generate collision-safe Team ID even after prior deletions
+  const deletedIds = readJsonFile<string[]>(DELETED_TEAMS_FILE, []);
+  const numericIds = [...teams.map(t => t.id), ...deletedIds]
+    .map(id => {
+      const m = String(id).match(/\d+/);
+      return m ? parseInt(m[0], 10) : 0;
+    })
+    .filter(n => !Number.isNaN(n));
+  const nextNumber = (numericIds.length > 0 ? Math.max(...numericIds) : 0) + 1;
   const teamId = `IDN-${String(nextNumber).padStart(4, '0')}`;
 
   const newTeam: RegisteredTeamRecord = {
@@ -521,6 +538,28 @@ app.patch('/api/teams/:id/checkin', (req: Request, res: Response) => {
 
   writeDatabase(teams);
   return res.json({ success: true, data: teams[idx] });
+});
+
+// 5.1 DELETE REGISTERED TEAM
+app.delete('/api/teams/:id', (req: Request, res: Response) => {
+  const teamId = req.params.id.trim().toUpperCase();
+  const teams = readDatabase();
+  const filtered = teams.filter(t => t.id.toUpperCase() !== teamId);
+  writeDatabase(filtered);
+
+  const deletedIds = readJsonFile<string[]>(DELETED_TEAMS_FILE, []);
+  if (!deletedIds.includes(teamId)) {
+    deletedIds.push(teamId);
+    writeJsonFile(DELETED_TEAMS_FILE, deletedIds);
+  }
+
+  return res.json({
+    success: true,
+    deletedId: teamId,
+    deletedTeamIds: deletedIds,
+    data: filtered,
+    message: `Team ${teamId} deleted from central database.`,
+  });
 });
 
 // 5.5 SUBMIT PROJECT PRESENTATION (PPT / DECK / DEMO)
@@ -780,6 +819,7 @@ app.post('/api/content/:section', (req: Request, res: Response) => {
 // 5.10 UNIVERSAL CENTRAL SYNC (ALL DATA AT ONCE)
 app.get('/api/sync/all', (_req: Request, res: Response) => {
   const teams = readDatabase();
+  const deletedTeamIds = readJsonFile<string[]>(DELETED_TEAMS_FILE, []);
   const config = readJsonFile(CONFIG_FILE, null);
   const announcements = readJsonFile(ANNOUNCEMENTS_FILE, []);
   const coreTeam = readJsonFile(CORE_TEAM_FILE, []);
@@ -788,11 +828,15 @@ app.get('/api/sync/all', (_req: Request, res: Response) => {
   const tracks = readOptionalJsonFile<{ section: string; items: any[]; updatedAt: string }>(getContentFilePath('tracks'));
   const prizes = readOptionalJsonFile<{ section: string; items: any[]; updatedAt: string }>(getContentFilePath('prizes'));
   const faqs = readOptionalJsonFile<{ section: string; items: any[]; updatedAt: string }>(getContentFilePath('faqs'));
+  const announcementsSection = readOptionalJsonFile<{ section: string; items: any[]; updatedAt: string }>(getContentFilePath('announcements'));
+  const coreTeamIndex = readOptionalJsonFile<{ section: string; items: any[]; updatedAt: string }>(getContentFilePath('core_team_index'));
+  const deletedTeamsSection = readOptionalJsonFile<{ section: string; items: any[]; updatedAt: string }>(getContentFilePath('deleted_teams'));
 
   return res.json({
     success: true,
     timestamp: new Date().toISOString(),
     teams,
+    deletedTeamIds,
     config,
     announcements,
     coreTeam,
@@ -801,6 +845,72 @@ app.get('/api/sync/all', (_req: Request, res: Response) => {
     tracks,
     prizes,
     faqs,
+    announcementsSection,
+    coreTeamIndex,
+    deletedTeamsSection,
+  });
+});
+
+// 5.11 ATOMIC PUSH-ALL ENDPOINT (SYNCS ALL SECTIONS, CONFIG, TEAMS, AND DELETIONS AT ONCE)
+app.post('/api/sync/push-all', (req: Request, res: Response) => {
+  const nowIso = req.body?.updatedAt || new Date().toISOString();
+  const {
+    config,
+    announcements,
+    coreTeam,
+    rules,
+    schedule,
+    tracks,
+    prizes,
+    faqs,
+    teams,
+    deletedTeamIds,
+  } = req.body || {};
+
+  if (config && typeof config === 'object') {
+    writeJsonFile(CONFIG_FILE, { ...config, updatedAt: config.updatedAt || nowIso });
+  }
+  if (Array.isArray(announcements)) {
+    writeJsonFile(ANNOUNCEMENTS_FILE, announcements);
+    writeJsonFile(getContentFilePath('announcements'), { section: 'announcements', items: announcements, updatedAt: nowIso });
+  }
+  if (Array.isArray(coreTeam)) {
+    writeJsonFile(CORE_TEAM_FILE, coreTeam);
+    writeJsonFile(getContentFilePath('core_team_index'), { section: 'core_team_index', items: coreTeam.map((m: any) => m.id), updatedAt: nowIso });
+  }
+  if (Array.isArray(rules)) {
+    writeJsonFile(getContentFilePath('rules'), { section: 'rules', items: rules, updatedAt: nowIso });
+  }
+  if (Array.isArray(schedule)) {
+    writeJsonFile(getContentFilePath('schedule'), { section: 'schedule', items: schedule, updatedAt: nowIso });
+  }
+  if (Array.isArray(tracks)) {
+    writeJsonFile(getContentFilePath('tracks'), { section: 'tracks', items: tracks, updatedAt: nowIso });
+  }
+  if (Array.isArray(prizes)) {
+    writeJsonFile(getContentFilePath('prizes'), { section: 'prizes', items: prizes, updatedAt: nowIso });
+  }
+  if (Array.isArray(faqs)) {
+    writeJsonFile(getContentFilePath('faqs'), { section: 'faqs', items: faqs, updatedAt: nowIso });
+  }
+  if (Array.isArray(deletedTeamIds)) {
+    const normalized = Array.from(new Set(deletedTeamIds.map((id: any) => String(id).toUpperCase())));
+    writeJsonFile(DELETED_TEAMS_FILE, normalized);
+    writeJsonFile(getContentFilePath('deleted_teams'), { section: 'deleted_teams', items: normalized, updatedAt: nowIso });
+  }
+  if (Array.isArray(teams)) {
+    const deletedSet = new Set(
+      (Array.isArray(deletedTeamIds) ? deletedTeamIds : readJsonFile<string[]>(DELETED_TEAMS_FILE, []))
+        .map((id: any) => String(id).toUpperCase())
+    );
+    const cleanedTeams = teams.filter((t: any) => t?.id && !deletedSet.has(String(t.id).toUpperCase()));
+    writeDatabase(cleanedTeams);
+  }
+
+  return res.json({
+    success: true,
+    timestamp: nowIso,
+    message: 'All website configuration, rules, schedule, announcements, core team, and teams synced.',
   });
 });
 

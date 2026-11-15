@@ -1,6 +1,6 @@
 import React from 'react';
 import { useHackathon } from '../context/HackathonContext';
-import { MapPin, Mail, Phone, ShieldCheck, Heart } from 'lucide-react';
+import { MapPin, Mail, ShieldCheck, ExternalLink } from 'lucide-react';
 import bulbImg from '../assets/images/ideation_logo.jpg';
 
 interface FooterProps {
@@ -9,7 +9,8 @@ interface FooterProps {
 }
 
 export const Footer: React.FC<FooterProps> = ({ onOpenTerms, onOpenPrivacy }) => {
-  const { navigateTo, setShowRegisterModal, eventConfig } = useHackathon();
+  const { navigateTo, setShowRegisterModal, eventConfig, tracks } = useHackathon();
+  const activeTrackCount = tracks.filter((t) => t.active).length || tracks.length;
 
   return (
     <footer className="bg-[#030712] border-t border-[#78AAFF]/20 pt-16 pb-24 md:pb-16 px-4 sm:px-6 lg:px-8 text-[#9DB0D0] text-xs">
@@ -38,7 +39,7 @@ export const Footer: React.FC<FooterProps> = ({ onOpenTerms, onOpenPrivacy }) =>
               className="flex items-center gap-2 cursor-pointer hover:text-[#35E0FF] transition-colors"
             >
               <MapPin className="w-3.5 h-3.5 text-[#35E0FF] shrink-0" />
-              <span>325, Shamanur Rd, BIET Campus, Davangere, Karnataka 577004</span>
+              <span>{eventConfig.locationAddress || '325, Shamanur Rd, BIET Campus, Davangere, Karnataka 577004'}</span>
             </div>
             <div className="flex items-center gap-2">
               <Mail className="w-3.5 h-3.5 text-[#35E0FF] shrink-0" />
@@ -60,7 +61,7 @@ export const Footer: React.FC<FooterProps> = ({ onOpenTerms, onOpenPrivacy }) =>
             </li>
             <li>
               <button onClick={() => navigateTo('home', 'tracks')} className="hover:text-[#35E0FF] transition-colors cursor-pointer">
-                6 Domain Tracks
+                {activeTrackCount} Domain Tracks
               </button>
             </li>
             <li>
@@ -125,6 +126,44 @@ export const Footer: React.FC<FooterProps> = ({ onOpenTerms, onOpenPrivacy }) =>
               <span>Admin Management Suite</span>
               <ShieldCheck className="w-3.5 h-3.5 text-[#FF8A2A]" />
             </button>
+
+            {(eventConfig.brochurePdfLink || eventConfig.problemStatementsLink || eventConfig.whatsappGroupLink) && (
+              <div className="pt-2 space-y-2">
+                {eventConfig.problemStatementsLink && (
+                  <a
+                    href={eventConfig.problemStatementsLink}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="w-full text-left p-2 rounded-xl bg-[#0C1630] border border-[#78AAFF]/20 hover:border-[#35E0FF] text-xs text-[#35E0FF] flex items-center justify-between transition-colors"
+                  >
+                    <span>Problem Statements</span>
+                    <ExternalLink className="w-3.5 h-3.5" />
+                  </a>
+                )}
+                {eventConfig.brochurePdfLink && (
+                  <a
+                    href={eventConfig.brochurePdfLink}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="w-full text-left p-2 rounded-xl bg-[#0C1630] border border-[#78AAFF]/20 hover:border-[#35E0FF] text-xs text-[#35E0FF] flex items-center justify-between transition-colors"
+                  >
+                    <span>Official Brochure & Rulebook</span>
+                    <ExternalLink className="w-3.5 h-3.5" />
+                  </a>
+                )}
+                {eventConfig.whatsappGroupLink && (
+                  <a
+                    href={eventConfig.whatsappGroupLink}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="w-full text-left p-2 rounded-xl bg-[#0C1630] border border-emerald-500/30 hover:border-emerald-400 text-xs text-emerald-400 flex items-center justify-between transition-colors"
+                  >
+                    <span>WhatsApp Community Group</span>
+                    <ExternalLink className="w-3.5 h-3.5" />
+                  </a>
+                )}
+              </div>
+            )}
           </div>
         </div>
       </div>

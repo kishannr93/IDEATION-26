@@ -9,8 +9,9 @@ interface HeroSectionProps {
 }
 
 export const HeroSection: React.FC<HeroSectionProps> = ({ onOpenQR }) => {
-  const { eventConfig, setShowRegisterModal, registeredTeams, navigateTo } = useHackathon();
+  const { eventConfig, tracks, setShowRegisterModal, navigateTo } = useHackathon();
   const [downloadingPpt, setDownloadingPpt] = useState(false);
+  const activeTrackCount = tracks.filter((t) => t.active).length || tracks.length;
 
   // Dynamic Countdown timer tracking structured metadata startDate (December 1, 2026)
   const [timeLeft, setTimeLeft] = useState({
@@ -70,7 +71,13 @@ export const HeroSection: React.FC<HeroSectionProps> = ({ onOpenQR }) => {
 
   const handleDownloadTemplate = async () => {
     if (eventConfig?.officialPptLink) {
-      window.open(eventConfig.officialPptLink, '_blank', 'noopener,noreferrer');
+      const a = document.createElement('a');
+      a.href = eventConfig.officialPptLink;
+      a.target = '_blank';
+      a.rel = 'noopener noreferrer';
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
       return;
     }
     try {
@@ -172,7 +179,7 @@ export const HeroSection: React.FC<HeroSectionProps> = ({ onOpenQR }) => {
                 <MapPin className="w-3.5 h-3.5 text-[#35E0FF]" />
                 <span>Venue</span>
               </div>
-              <div className="font-semibold text-white text-sm mt-1">BIET Davangere</div>
+              <div className="font-semibold text-white text-sm mt-1">{eventConfig.venue || 'BIET Davangere'}</div>
             </div>
 
             <div className="p-3 rounded-xl bg-[#0C1630]/90 border border-[#78AAFF]/20 backdrop-blur-md">
@@ -180,7 +187,7 @@ export const HeroSection: React.FC<HeroSectionProps> = ({ onOpenQR }) => {
                 <Users className="w-3.5 h-3.5 text-[#35E0FF]" />
                 <span>Team Size</span>
               </div>
-              <div className="font-semibold text-white text-sm mt-1">3 to 4 Members</div>
+              <div className="font-semibold text-white text-sm mt-1">{eventConfig.teamSize || '3 to 4 Members'}</div>
             </div>
 
             <div className="p-3 rounded-xl bg-[#0C1630]/90 border border-[#FFC83D]/30 backdrop-blur-md">
@@ -188,7 +195,7 @@ export const HeroSection: React.FC<HeroSectionProps> = ({ onOpenQR }) => {
                 <Trophy className="w-3.5 h-3.5 text-[#FFC83D]" />
                 <span>Prize Pool</span>
               </div>
-              <div className="font-bold text-[#FFC83D] text-sm mt-1">₹1,00,000</div>
+              <div className="font-bold text-[#FFC83D] text-sm mt-1">₹{eventConfig.prizePoolAmount.toLocaleString('en-IN')}</div>
             </div>
           </div>
 
@@ -259,7 +266,7 @@ export const HeroSection: React.FC<HeroSectionProps> = ({ onOpenQR }) => {
               onClick={() => navigateTo('home', 'tracks')}
               className="px-6 py-3.5 rounded-xl font-semibold text-sm text-[#F2F6FF] bg-[#0C1630] hover:bg-[#132247] border border-[#35E0FF]/40 hover:border-[#35E0FF] transition-all flex items-center gap-2 cursor-pointer"
             >
-              <span>View 6 Tracks</span>
+              <span>View {activeTrackCount} Tracks</span>
             </button>
 
             <button
@@ -284,7 +291,7 @@ export const HeroSection: React.FC<HeroSectionProps> = ({ onOpenQR }) => {
           {/* Eligibility Note */}
           <div className="mt-4 flex items-center gap-2 text-xs text-[#9DB0D0]">
             <CheckCircle className="w-4 h-4 text-emerald-400 shrink-0" />
-            <span>Eligible: <strong>B.E / B.Tech, M.Tech, and MCA students</strong> from all recognized institutions.</span>
+            <span>Eligible: <strong>{eventConfig.eligibility || 'B.E / B.Tech, M.Tech, and MCA students'}</strong> from all recognized institutions.</span>
           </div>
         </div>
 
@@ -313,7 +320,7 @@ export const HeroSection: React.FC<HeroSectionProps> = ({ onOpenQR }) => {
                 </div>
                 <div className="text-right">
                   <div className="text-[10px] font-mono text-amber-300">Prize Pool</div>
-                  <div className="font-bold text-[#FFC83D]">₹1,00,000</div>
+                  <div className="font-bold text-[#FFC83D]">₹{eventConfig.prizePoolAmount.toLocaleString('en-IN')}</div>
                 </div>
               </div>
             </div>

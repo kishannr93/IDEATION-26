@@ -32,6 +32,7 @@ import {
   updateTeamPaymentInFirestore,
   updateTeamCheckInInFirestore,
   updateTeamSubmissionInFirestore,
+  deleteTeamFromFirestore,
   subscribeFirestoreTeams,
   testFirestoreConnection,
   saveSiteConfigToFirestore,
@@ -44,8 +45,10 @@ import {
   subscribeFirestoreCoreTeam,
   saveSiteContentToFirestore,
   subscribeFirestoreSiteContent,
+  fetchAllFromFirestore,
   SiteContentSection,
 } from '../lib/firebase';
+import { supabase, isSupabaseConfigured } from '../lib/supabase';
 import {
   syncAllTeamsToGoogleSheet,
   appendTeamToGoogleSheet,
@@ -98,6 +101,7 @@ interface HackathonContextType {
   registeredTeams: RegisteredTeam[];
   registerTeam: (teamData: Omit<RegisteredTeam, 'id' | 'registeredAt' | 'checkedIn'>) => { success: boolean; teamId?: string; error?: string };
   updateTeam: (id: string, updated: Partial<RegisteredTeam>) => void;
+  deleteTeam: (id: string) => Promise<{ success: boolean; error?: string }>;
   updatePaymentStatus: (id: string, status: 'Pending' | 'Verified' | 'Rejected', remarks?: string) => void;
   toggleCheckIn: (id: string) => { success: boolean; checkedIn?: boolean; error?: string };
   
@@ -120,6 +124,8 @@ interface HackathonContextType {
   exportTeamsToCSV: () => void;
   exportTeamsToSQL: () => void;
   resetAllData: () => void;
+  syncAllToCloud: () => Promise<{ success: boolean; syncedAt: string }>;
+  isSyncingAll: boolean;
 
   // Google Sheets & Cloud Sync
   googleUser: User | null;
@@ -242,15 +248,19 @@ export const HackathonProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     if (saved) {
       try {
         const parsed = JSON.parse(saved);
-        return Array.isArray(parsed)
-          ? parsed.filter(t => !['IDN-0001', 'IDN-0002', 'IDN-0003', 'IDN-0004'].includes(t.id))
-          : [];
+        if (!Array.isArray(parsed)) return [];
+        const savedDeleted = localStorage.getItem('ideation_deleted_teams');
+        const deletedIds: string[] = savedDeleted ? JSON.parse(savedDeleted) : [];
+        const deletedSet = new Set(Array.isArray(deletedIds) ? deletedIds.map((id) => String(id).toUpperCase()) : []);
+        return parsed.filter((t) => t?.id && !deletedSet.has(String(t.id).toUpperCase()));
       } catch {
         return [];
       }
     }
     return [];
   });
+
+  const [isSyncingAll, setIsSyncingAll] = useState<boolean>(false);
 
   const [currentTeamSession, setCurrentTeamSession] = useState<RegisteredTeam | null>(null);
   const [selectedTrackForRegistration, setSelectedTrackForRegistration] = useState<string | null>(null);
@@ -277,6 +287,19 @@ export const HackathonProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     }
   })());
 
+  // Track deleted team IDs across tabs/URLs/devices so deleted teams never resurrect
+  const deletedTeamIdsRef = React.useRef<string[]>((() => {
+    try {
+      const saved = localStorage.getItem('ideation_deleted_teams');
+      const parsed = saved ? JSON.parse(saved) : [];
+      return Array.isArray(parsed) ? parsed.map((id) => String(id).toUpperCase()) : [];
+    } catch {
+      return [];
+    }
+  })());
+
+  const coreTeamIndexIdsRef = React.useRef<string[] | null>(null);
+
   const recordSyncTimestamp = (key: string, isoOrMs?: string | number): number => {
     const ms =
       typeof isoOrMs === 'number'
@@ -297,6 +320,99 @@ export const HackathonProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     const remoteTs = Date.parse(remoteUpdatedAt) || 0;
     if (localTs === 0) return true;
     return remoteTs > localTs;
+  };
+
+  const applyDeletedIdsUpdate = (incomingIds: string[], updatedAt?: string, replaceExact = false) => {
+    const normalizedIncoming = incomingIds.map((id) => String(id).toUpperCase()).filter(Boolean);
+    const nextIds = replaceExact
+      ? Array.from(new Set(normalizedIncoming))
+      : Array.from(new Set([...deletedTeamIdsRef.current, ...normalizedIncoming]));
+
+    deletedTeamIdsRef.current = nextIds;
+    if (updatedAt) {
+      recordSyncTimestamp('deleted_teams', updatedAt);
+    }
+    try {
+      localStorage.setItem('ideation_deleted_teams', JSON.stringify(nextIds));
+    } catch {}
+
+    const deletedSet = new Set(nextIds);
+    setRegisteredTeams((prev) => prev.filter((t) => !deletedSet.has(t.id.toUpperCase())));
+    setCurrentTeamSession((prev) => (prev && deletedSet.has(prev.id.toUpperCase()) ? null : prev));
+  };
+
+  const applyTeamsSnapshot = (incomingTeams: RegisteredTeam[], authoritative: boolean) => {
+    const deletedSet = new Set(deletedTeamIdsRef.current.map((id) => id.toUpperCase()));
+    const cleanIncoming = incomingTeams.filter((t) => t?.id && !deletedSet.has(t.id.toUpperCase()));
+
+    setRegisteredTeams((prev) => {
+      let nextList: RegisteredTeam[];
+      if (authoritative) {
+        const map = new Map<string, RegisteredTeam>();
+        cleanIncoming.forEach((t) => map.set(t.id, t));
+        // Preserve very recent (<15s) local registrations still propagating to cloud
+        const now = Date.now();
+        prev.forEach((t) => {
+          if (!deletedSet.has(t.id.toUpperCase()) && !map.has(t.id)) {
+            const ageMs = now - new Date(t.registeredAt).getTime();
+            if (!Number.isNaN(ageMs) && ageMs >= 0 && ageMs < 15000) {
+              map.set(t.id, t);
+            }
+          }
+        });
+        nextList = Array.from(map.values());
+      } else {
+        const map = new Map<string, RegisteredTeam>();
+        prev.forEach((t) => {
+          if (!deletedSet.has(t.id.toUpperCase())) map.set(t.id, t);
+        });
+        cleanIncoming.forEach((t) => map.set(t.id, t));
+        nextList = Array.from(map.values());
+      }
+      nextList.sort((a, b) => new Date(b.registeredAt).getTime() - new Date(a.registeredAt).getTime());
+
+      setCurrentTeamSession((cur) => {
+        if (!cur) return null;
+        if (deletedSet.has(cur.id.toUpperCase())) return null;
+        return nextList.find((t) => t.id === cur.id) || (authoritative ? null : cur);
+      });
+
+      return nextList;
+    });
+  };
+
+  const applyCoreTeamSnapshot = (remoteMembers: CoreTeamMember[], fromServer: boolean) => {
+    if (!Array.isArray(remoteMembers)) return;
+    if (remoteMembers.length === 0 && !fromServer) return;
+
+    setCoreTeam((prev) => {
+      const indexIds = coreTeamIndexIdsRef.current;
+      if (indexIds && indexIds.length > 0) {
+        const map = new Map<string, CoreTeamMember>();
+        prev.forEach((m) => map.set(m.id, m));
+        remoteMembers.forEach((m) => map.set(m.id, m));
+        const ordered: CoreTeamMember[] = [];
+        indexIds.forEach((id) => {
+          const item = map.get(id);
+          if (item) ordered.push(item);
+        });
+        // Include any newly added docs not yet in index
+        remoteMembers.forEach((m) => {
+          if (!indexIds.includes(m.id)) ordered.push(m);
+        });
+        return ordered.sort((a, b) => a.order - b.order);
+      }
+
+      // If remote has fewer members than default set without an explicit index, merge safely
+      if (remoteMembers.length < prev.length && remoteMembers.length <= 3) {
+        const map = new Map<string, CoreTeamMember>();
+        prev.forEach((m) => map.set(m.id, m));
+        remoteMembers.forEach((m) => map.set(m.id, m));
+        return Array.from(map.values()).sort((a, b) => a.order - b.order);
+      }
+
+      return remoteMembers.length > 0 || fromServer ? [...remoteMembers].sort((a, b) => a.order - b.order) : prev;
+    });
   };
 
   // Project PPT Submissions & Admin Alerts State
@@ -335,17 +451,18 @@ export const HackathonProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       }
     );
 
-    // Live multi-device Firestore subscriptions (any laptop, mobile, browser globally)
-    const unsubTeams = subscribeFirestoreTeams((cloudTeams) => {
-      if (cloudTeams && cloudTeams.length > 0) {
-        setRegisteredTeams((prev) => {
-          const map = new Map<string, RegisteredTeam>();
-          prev.forEach((t) => map.set(t.id, t));
-          cloudTeams.forEach((t) => map.set(t.id, t));
-          return Array.from(map.values()).sort(
-            (a, b) => new Date(b.registeredAt).getTime() - new Date(a.registeredAt).getTime()
-          );
-        });
+    // Live multi-device Firestore subscriptions (any laptop, mobile, browser, and URL globally)
+    const unsubDeletedTeams = subscribeFirestoreSiteContent<string>('deleted_teams', (payload) => {
+      if (shouldApplyRemoteUpdate('deleted_teams', payload.updatedAt)) {
+        applyDeletedIdsUpdate(payload.items, payload.updatedAt, true);
+      } else if (payload.items.length > 0) {
+        applyDeletedIdsUpdate(payload.items);
+      }
+    });
+
+    const unsubTeams = subscribeFirestoreTeams((cloudTeams, fromServer) => {
+      if (cloudTeams && (cloudTeams.length > 0 || fromServer)) {
+        applyTeamsSnapshot(cloudTeams, fromServer);
       }
     });
 
@@ -358,16 +475,33 @@ export const HackathonProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       }
     });
 
+    const unsubAnnouncementsContent = subscribeFirestoreSiteContent<Announcement>('announcements', (payload) => {
+      if (shouldApplyRemoteUpdate('announcements', payload.updatedAt)) {
+        recordSyncTimestamp('announcements', payload.updatedAt);
+        setAnnouncements(payload.items);
+      }
+    });
+
     const unsubAnnouncements = subscribeFirestoreAnnouncements((remoteAnnouncements, fromServer) => {
-      if (remoteAnnouncements && (remoteAnnouncements.length > 0 || fromServer)) {
+      if (!syncTimestampsRef.current['announcements'] && remoteAnnouncements && (remoteAnnouncements.length > 0 || fromServer)) {
         setAnnouncements(remoteAnnouncements);
       }
     });
 
-    const unsubCoreTeam = subscribeFirestoreCoreTeam((remoteMembers) => {
-      if (remoteMembers && remoteMembers.length > 0) {
-        setCoreTeam(remoteMembers);
+    const unsubCoreTeamIndex = subscribeFirestoreSiteContent<string>('core_team_index', (payload) => {
+      if (shouldApplyRemoteUpdate('core_team_index', payload.updatedAt)) {
+        recordSyncTimestamp('core_team_index', payload.updatedAt);
+        coreTeamIndexIdsRef.current = payload.items;
+        setCoreTeam((prev) => {
+          const map = new Map(prev.map((m) => [m.id, m]));
+          const filtered = payload.items.map((id) => map.get(id)).filter((m): m is CoreTeamMember => Boolean(m));
+          return filtered.length > 0 ? filtered.sort((a, b) => a.order - b.order) : prev;
+        });
       }
+    });
+
+    const unsubCoreTeam = subscribeFirestoreCoreTeam((remoteMembers, fromServer) => {
+      applyCoreTeamSnapshot(remoteMembers, fromServer);
     });
 
     // Live cross-device subscriptions for Rules, Schedule, Tracks, Prizes, and FAQs
@@ -408,9 +542,12 @@ export const HackathonProvider: React.FC<{ children: React.ReactNode }> = ({ chi
 
     return () => {
       unsubAuth();
+      unsubDeletedTeams();
       unsubTeams();
       unsubConfig();
+      unsubAnnouncementsContent();
       unsubAnnouncements();
+      unsubCoreTeamIndex();
       unsubCoreTeam();
       unsubRules();
       unsubSchedule();
@@ -571,6 +708,63 @@ export const HackathonProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     broadcastLiveSync(`SYNC_${section.toUpperCase()}`);
   };
 
+  // Pull all state from Firestore (cross-URL / cross-device) + local Express DB
+  const pullAllFromCloud = async () => {
+    try {
+      const snapshot = await fetchAllFromFirestore();
+      const deletedDoc = snapshot.sections.deleted_teams;
+      if (deletedDoc) {
+        if (shouldApplyRemoteUpdate('deleted_teams', deletedDoc.updatedAt)) {
+          applyDeletedIdsUpdate(deletedDoc.items as string[], deletedDoc.updatedAt, true);
+        } else {
+          applyDeletedIdsUpdate(deletedDoc.items as string[]);
+        }
+      }
+      if (snapshot.config && Object.keys(snapshot.config).length > 0) {
+        if (shouldApplyRemoteUpdate('config', snapshot.config.updatedAt)) {
+          recordSyncTimestamp('config', snapshot.config.updatedAt);
+          setEventConfig((prev) => ({ ...prev, ...snapshot.config }));
+        }
+      }
+      if (snapshot.sections.rules && shouldApplyRemoteUpdate('rules', snapshot.sections.rules.updatedAt)) {
+        recordSyncTimestamp('rules', snapshot.sections.rules.updatedAt);
+        setRules(snapshot.sections.rules.items as RuleItem[]);
+      }
+      if (snapshot.sections.schedule && shouldApplyRemoteUpdate('schedule', snapshot.sections.schedule.updatedAt)) {
+        recordSyncTimestamp('schedule', snapshot.sections.schedule.updatedAt);
+        setSchedule(snapshot.sections.schedule.items as ScheduleEvent[]);
+      }
+      if (snapshot.sections.tracks && shouldApplyRemoteUpdate('tracks', snapshot.sections.tracks.updatedAt)) {
+        recordSyncTimestamp('tracks', snapshot.sections.tracks.updatedAt);
+        setTracks(snapshot.sections.tracks.items as DomainTrack[]);
+      }
+      if (snapshot.sections.prizes && shouldApplyRemoteUpdate('prizes', snapshot.sections.prizes.updatedAt)) {
+        recordSyncTimestamp('prizes', snapshot.sections.prizes.updatedAt);
+        setPrizes(snapshot.sections.prizes.items as PrizeItem[]);
+      }
+      if (snapshot.sections.faqs && shouldApplyRemoteUpdate('faqs', snapshot.sections.faqs.updatedAt)) {
+        recordSyncTimestamp('faqs', snapshot.sections.faqs.updatedAt);
+        setFaqs(snapshot.sections.faqs.items as FAQItem[]);
+      }
+      if (snapshot.sections.announcements && shouldApplyRemoteUpdate('announcements', snapshot.sections.announcements.updatedAt)) {
+        recordSyncTimestamp('announcements', snapshot.sections.announcements.updatedAt);
+        setAnnouncements(snapshot.sections.announcements.items as Announcement[]);
+      } else if (!syncTimestampsRef.current['announcements'] && snapshot.announcements.length > 0) {
+        setAnnouncements(snapshot.announcements);
+      }
+      if (snapshot.sections.core_team_index && shouldApplyRemoteUpdate('core_team_index', snapshot.sections.core_team_index.updatedAt)) {
+        recordSyncTimestamp('core_team_index', snapshot.sections.core_team_index.updatedAt);
+        coreTeamIndexIdsRef.current = snapshot.sections.core_team_index.items as string[];
+      }
+      if (snapshot.coreTeam.length > 0) {
+        applyCoreTeamSnapshot(snapshot.coreTeam, true);
+      }
+      if (snapshot.teams.length > 0 || deletedDoc) {
+        applyTeamsSnapshot(snapshot.teams, true);
+      }
+    } catch {}
+  };
+
   // Central Database Synchronization & Live Polling (Teams, Config, News, Team, Rules, Schedule, Tracks, Prizes, FAQs)
   useEffect(() => {
     let isMounted = true;
@@ -581,14 +775,18 @@ export const HackathonProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         if (res.ok) {
           const json = await res.json();
           if (json.success && isMounted) {
-            if (Array.isArray(json.teams) && json.teams.length > 0) {
-              setRegisteredTeams(json.teams);
-              if (currentTeamSession) {
-                const updatedSession = json.teams.find((t: RegisteredTeam) => t.id === currentTeamSession.id);
-                if (updatedSession) {
-                  setCurrentTeamSession(updatedSession);
-                }
+            if (json.deletedTeamsSection && Array.isArray(json.deletedTeamsSection.items)) {
+              if (shouldApplyRemoteUpdate('deleted_teams', json.deletedTeamsSection.updatedAt)) {
+                applyDeletedIdsUpdate(json.deletedTeamsSection.items, json.deletedTeamsSection.updatedAt, true);
+              } else {
+                applyDeletedIdsUpdate(json.deletedTeamsSection.items);
               }
+            } else if (Array.isArray(json.deletedTeamIds) && json.deletedTeamIds.length > 0) {
+              applyDeletedIdsUpdate(json.deletedTeamIds);
+            }
+
+            if (Array.isArray(json.teams) && json.teams.length > 0) {
+              applyTeamsSnapshot(json.teams, false);
             }
             if (json.config && typeof json.config === 'object' && Object.keys(json.config).length > 0) {
               if (shouldApplyRemoteUpdate('config', json.config.updatedAt)) {
@@ -596,11 +794,18 @@ export const HackathonProvider: React.FC<{ children: React.ReactNode }> = ({ chi
                 setEventConfig(prev => ({ ...prev, ...json.config }));
               }
             }
-            if (Array.isArray(json.announcements) && json.announcements.length > 0) {
+            if (json.announcementsSection && Array.isArray(json.announcementsSection.items) && shouldApplyRemoteUpdate('announcements', json.announcementsSection.updatedAt)) {
+              recordSyncTimestamp('announcements', json.announcementsSection.updatedAt);
+              setAnnouncements(json.announcementsSection.items);
+            } else if (!syncTimestampsRef.current['announcements'] && Array.isArray(json.announcements) && json.announcements.length > 0) {
               setAnnouncements(json.announcements);
             }
+            if (json.coreTeamIndex && Array.isArray(json.coreTeamIndex.items) && shouldApplyRemoteUpdate('core_team_index', json.coreTeamIndex.updatedAt)) {
+              recordSyncTimestamp('core_team_index', json.coreTeamIndex.updatedAt);
+              coreTeamIndexIdsRef.current = json.coreTeamIndex.items;
+            }
             if (Array.isArray(json.coreTeam) && json.coreTeam.length > 0) {
-              setCoreTeam(json.coreTeam);
+              applyCoreTeamSnapshot(json.coreTeam, false);
             }
             if (json.rules && Array.isArray(json.rules.items) && shouldApplyRemoteUpdate('rules', json.rules.updatedAt)) {
               recordSyncTimestamp('rules', json.rules.updatedAt);
@@ -624,12 +829,11 @@ export const HackathonProvider: React.FC<{ children: React.ReactNode }> = ({ chi
             }
           }
         } else {
-          // Fallback to /api/teams
           const teamsRes = await fetch('/api/teams');
           if (teamsRes.ok) {
             const teamsJson = await teamsRes.json();
             if (teamsJson.success && Array.isArray(teamsJson.data) && isMounted) {
-              setRegisteredTeams(teamsJson.data);
+              applyTeamsSnapshot(teamsJson.data, false);
             }
           }
         }
@@ -638,24 +842,44 @@ export const HackathonProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       }
     };
 
-    // Initial load
+    // Initial load: pull both Firestore (shared across all URLs) and local Express DB
+    pullAllFromCloud();
     syncWithCentralDatabase();
 
-    // Live polling every 2.5s for real-time status & content updates without manual refresh
+    // Live polling every 2.5s for same-server updates + 15s cloud refresh fallback
     const pollTimer = setInterval(syncWithCentralDatabase, 2500);
+    const cloudRefreshTimer = setInterval(() => {
+      if (isMounted) pullAllFromCloud();
+    }, 15000);
+
+    // Refresh immediately whenever tab gains focus or becomes visible on any device
+    const handleVisibilityOrFocus = () => {
+      if (document.visibilityState === 'visible' && isMounted) {
+        pullAllFromCloud();
+        syncWithCentralDatabase();
+      }
+    };
+    window.addEventListener('focus', handleVisibilityOrFocus);
+    document.addEventListener('visibilitychange', handleVisibilityOrFocus);
 
     // Multi-tab broadcast channel
     let channel: BroadcastChannel | null = null;
     try {
       channel = new BroadcastChannel('ideation_live_sync');
       channel.onmessage = () => {
-        if (isMounted) syncWithCentralDatabase();
+        if (isMounted) {
+          syncWithCentralDatabase();
+          pullAllFromCloud();
+        }
       };
     } catch {}
 
     return () => {
       isMounted = false;
       clearInterval(pollTimer);
+      clearInterval(cloudRefreshTimer);
+      window.removeEventListener('focus', handleVisibilityOrFocus);
+      document.removeEventListener('visibilitychange', handleVisibilityOrFocus);
       channel?.close();
     };
   }, [currentTeamSession?.id]);
@@ -743,20 +967,27 @@ export const HackathonProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     persistContentSection('schedule', initialSchedule);
   };
 
+  const persistAnnouncementsSnapshot = (next: Announcement[]) => {
+    persistContentSection('announcements', next);
+    fetch('/api/announcements/sync', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ items: next }),
+    }).catch(() => {});
+  };
+
   const addAnnouncement = (item: Omit<Announcement, 'id' | 'date'>) => {
     const newAnnouncement: Announcement = {
       ...item,
       id: `a-${Date.now()}`,
       date: new Date().toISOString().split('T')[0],
     };
-    setAnnouncements(prev => [newAnnouncement, ...prev]);
-    saveAnnouncementToFirestore(newAnnouncement);
-    fetch('/api/announcements', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(newAnnouncement),
-    }).catch(() => {});
-    broadcastLiveSync('SYNC_ANNOUNCEMENTS');
+    setAnnouncements(prev => {
+      const next = [newAnnouncement, ...prev];
+      saveAnnouncementToFirestore(newAnnouncement);
+      persistAnnouncementsSnapshot(next);
+      return next;
+    });
   };
 
   const updateAnnouncement = (id: string, updated: Partial<Announcement>) => {
@@ -765,37 +996,41 @@ export const HackathonProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       const target = next.find(a => a.id === id);
       if (target) {
         saveAnnouncementToFirestore(target);
-        fetch('/api/announcements', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(target),
-        }).catch(() => {});
       }
-      broadcastLiveSync('SYNC_ANNOUNCEMENTS');
+      persistAnnouncementsSnapshot(next);
       return next;
     });
   };
 
   const deleteAnnouncement = (id: string) => {
-    setAnnouncements(prev => prev.filter(a => a.id !== id));
-    deleteAnnouncementFromFirestore(id);
-    fetch(`/api/announcements/${id}`, { method: 'DELETE' }).catch(() => {});
-    broadcastLiveSync('SYNC_ANNOUNCEMENTS');
+    setAnnouncements(prev => {
+      const next = prev.filter(a => a.id !== id);
+      deleteAnnouncementFromFirestore(id);
+      persistAnnouncementsSnapshot(next);
+      return next;
+    });
+  };
+
+  const persistCoreTeamSnapshot = (next: CoreTeamMember[], removedId?: string) => {
+    const ids = next.map((m) => m.id);
+    coreTeamIndexIdsRef.current = ids;
+    Promise.all(next.map((m) => saveCoreMemberToFirestore(m))).catch(() => {});
+    if (removedId) {
+      deleteCoreMemberFromFirestore(removedId).catch(() => {});
+    }
+    persistContentSection('core_team_index', ids);
+    fetch('/api/core-team/sync', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ items: next }),
+    }).catch(() => {});
+    broadcastLiveSync('SYNC_CORE_TEAM');
   };
 
   const updateCoreMember = (id: string, updated: Partial<CoreTeamMember>) => {
     setCoreTeam(prev => {
       const next = prev.map(m => (m.id === id ? { ...m, ...updated } : m));
-      const target = next.find(m => m.id === id);
-      if (target) {
-        saveCoreMemberToFirestore(target);
-        fetch('/api/core-team', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(target),
-        }).catch(() => {});
-      }
-      broadcastLiveSync('SYNC_CORE_TEAM');
+      persistCoreTeamSnapshot(next);
       return next;
     });
   };
@@ -805,21 +1040,19 @@ export const HackathonProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       ...member,
       id: `ct-${Date.now()}`,
     };
-    setCoreTeam(prev => [...prev, newMember]);
-    saveCoreMemberToFirestore(newMember);
-    fetch('/api/core-team', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(newMember),
-    }).catch(() => {});
-    broadcastLiveSync('SYNC_CORE_TEAM');
+    setCoreTeam(prev => {
+      const next = [...prev, newMember];
+      persistCoreTeamSnapshot(next);
+      return next;
+    });
   };
 
   const deleteCoreMember = (id: string) => {
-    setCoreTeam(prev => prev.filter(m => m.id !== id));
-    deleteCoreMemberFromFirestore(id);
-    fetch(`/api/core-team/${id}`, { method: 'DELETE' }).catch(() => {});
-    broadcastLiveSync('SYNC_CORE_TEAM');
+    setCoreTeam(prev => {
+      const next = prev.filter(m => m.id !== id);
+      persistCoreTeamSnapshot(next, id);
+      return next;
+    });
   };
 
   const reorderCoreTeam = (sourceIndex: number, destIndex: number) => {
@@ -828,13 +1061,7 @@ export const HackathonProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       const [removed] = copy.splice(sourceIndex, 1);
       copy.splice(destIndex, 0, removed);
       const reordered = copy.map((m, idx) => ({ ...m, order: idx + 1 }));
-      Promise.all(reordered.map(m => saveCoreMemberToFirestore(m))).catch(() => {});
-      fetch('/api/core-team/sync', {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ items: reordered }),
-      }).catch(() => {});
-      broadcastLiveSync('SYNC_CORE_TEAM');
+      persistCoreTeamSnapshot(reordered);
       return reordered;
     });
   };
@@ -927,8 +1154,14 @@ export const HackathonProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       }
     }
 
-    // Generate Team ID
-    const nextNumber = registeredTeams.length + 1;
+    // Generate collision-safe Team ID even after deletions
+    const numericIds = [...registeredTeams.map((t) => t.id), ...deletedTeamIdsRef.current]
+      .map((id) => {
+        const m = String(id).match(/\d+/);
+        return m ? parseInt(m[0], 10) : 0;
+      })
+      .filter((n) => !Number.isNaN(n));
+    const nextNumber = (numericIds.length > 0 ? Math.max(...numericIds) : 0) + 1;
     const teamId = `IDN-${String(nextNumber).padStart(4, '0')}`;
 
     const newTeam: RegisteredTeam = {
@@ -941,7 +1174,7 @@ export const HackathonProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     setRegisteredTeams(prev => [newTeam, ...prev]);
     setCurrentTeamSession(newTeam);
 
-    // 1. Save to Firestore Cloud Database (accessible worldwide from any laptop, mobile, browser)
+    // 1. Save to Firestore Cloud Database (accessible worldwide from any laptop, mobile, browser, and URL)
     saveTeamToFirestore(newTeam);
 
     // 2. Automatically append to Google Sheet if admin has connected Google Sheets
@@ -961,12 +1194,24 @@ export const HackathonProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       console.warn('Central DB sync warning:', err);
     });
 
-    // 4. Broadcast live sync to all tabs
-    try {
-      const channel = new BroadcastChannel('ideation_live_sync');
-      channel.postMessage({ type: 'SYNC_TEAMS' });
-      channel.close();
-    } catch {}
+    // 4. Optional Supabase mirror if configured
+    if (isSupabaseConfigured && supabase) {
+      const leader = newTeam.members.find((m) => m.isLeader) || newTeam.members[0];
+      supabase
+        .from('teams')
+        .upsert({
+          id: newTeam.id,
+          team_name: newTeam.teamName,
+          college: newTeam.college,
+          primary_track: newTeam.primaryTrack,
+          payment_status: newTeam.paymentStatus,
+          leader_email: leader?.email || '',
+        })
+        .then(() => {}, () => {});
+    }
+
+    // 5. Broadcast live sync to all tabs
+    broadcastLiveSync('SYNC_TEAMS');
 
     return { success: true, teamId };
   };
@@ -975,6 +1220,57 @@ export const HackathonProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     setRegisteredTeams(prev => prev.map(t => (t.id === id ? { ...t, ...updated } : t)));
     if (currentTeamSession?.id === id) {
       setCurrentTeamSession(prev => (prev ? { ...prev, ...updated } : null));
+    }
+  };
+
+  const deleteTeam = async (id: string): Promise<{ success: boolean; error?: string }> => {
+    try {
+      const normalizedId = id.trim().toUpperCase();
+      const remainingTeams = registeredTeams.filter((t) => t.id.toUpperCase() !== normalizedId);
+
+      // Record deleted ID globally so no polling or stale URL resurrects the deleted team
+      const nextDeleted = Array.from(new Set([...deletedTeamIdsRef.current, normalizedId]));
+      const nowIso = new Date().toISOString();
+      applyDeletedIdsUpdate(nextDeleted, nowIso, true);
+      persistContentSection('deleted_teams', nextDeleted);
+
+      setRegisteredTeams(remainingTeams);
+      if (currentTeamSession?.id.toUpperCase() === normalizedId) {
+        setCurrentTeamSession(null);
+      }
+      setSubmissionNotifications((prev) => prev.filter((n) => n.teamId.toUpperCase() !== normalizedId));
+
+      // 1. Delete from Firestore (all URLs & devices)
+      await deleteTeamFromFirestore(id);
+
+      // 2. Delete from Express central database
+      fetch(`/api/teams/${encodeURIComponent(id)}`, {
+        method: 'DELETE',
+      }).catch((err) => {
+        console.warn('Central DB delete team warning:', err);
+      });
+
+      // 3. Optional Supabase cleanup
+      if (isSupabaseConfigured && supabase) {
+        supabase
+          .from('teams')
+          .delete()
+          .eq('id', id)
+          .then(() => {}, () => {});
+      }
+
+      // 4. Re-sync Google Sheets if connected
+      const currentGToken = googleAccessToken || getGoogleAccessToken();
+      if (currentGToken) {
+        syncAllTeamsToGoogleSheet(currentGToken, remainingTeams).catch(console.warn);
+      }
+
+      // 5. Broadcast live sync to all tabs
+      broadcastLiveSync('SYNC_TEAMS');
+
+      return { success: true };
+    } catch (err: any) {
+      return { success: false, error: err?.message || 'Failed to delete team' };
     }
   };
 
@@ -1508,48 +1804,109 @@ export const HackathonProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     URL.revokeObjectURL(url);
   };
 
-  const resetAllData = () => {
-    if (window.confirm('Reset all hackathon data, teams, and content back to factory defaults?')) {
-      localStorage.clear();
-      const nowIso = new Date().toISOString();
-      const resetConfig = { ...initialEventConfig, updatedAt: nowIso };
+  const syncAllToCloud = async (): Promise<{ success: boolean; syncedAt: string }> => {
+    setIsSyncingAll(true);
+    const nowIso = new Date().toISOString();
+    try {
+      const mergedConfig = { ...eventConfig, updatedAt: nowIso };
+      const coreIds = coreTeam.map((m) => m.id);
+      coreTeamIndexIdsRef.current = coreIds;
+
       recordSyncTimestamp('config', nowIso);
-      setEventConfig(resetConfig);
-      saveSiteConfigToFirestore(resetConfig, nowIso);
-      fetch('/api/config', {
+      recordSyncTimestamp('rules', nowIso);
+      recordSyncTimestamp('schedule', nowIso);
+      recordSyncTimestamp('tracks', nowIso);
+      recordSyncTimestamp('prizes', nowIso);
+      recordSyncTimestamp('faqs', nowIso);
+      recordSyncTimestamp('announcements', nowIso);
+      recordSyncTimestamp('core_team_index', nowIso);
+      recordSyncTimestamp('deleted_teams', nowIso);
+
+      await Promise.all([
+        saveSiteConfigToFirestore(mergedConfig, nowIso),
+        saveSiteContentToFirestore('rules', rules, nowIso),
+        saveSiteContentToFirestore('schedule', schedule, nowIso),
+        saveSiteContentToFirestore('tracks', tracks, nowIso),
+        saveSiteContentToFirestore('prizes', prizes, nowIso),
+        saveSiteContentToFirestore('faqs', faqs, nowIso),
+        saveSiteContentToFirestore('announcements', announcements, nowIso),
+        saveSiteContentToFirestore('core_team_index', coreIds, nowIso),
+        saveSiteContentToFirestore('deleted_teams', deletedTeamIdsRef.current, nowIso),
+        ...coreTeam.map((m) => saveCoreMemberToFirestore(m)),
+        ...announcements.map((a) => saveAnnouncementToFirestore(a)),
+        ...registeredTeams.map((t) => saveTeamToFirestore(t)),
+        ...deletedTeamIdsRef.current.map((delId) => deleteTeamFromFirestore(delId)),
+      ]);
+
+      await fetch('/api/sync/push-all', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(resetConfig),
+        body: JSON.stringify({
+          updatedAt: nowIso,
+          config: mergedConfig,
+          announcements,
+          coreTeam,
+          rules,
+          schedule,
+          tracks,
+          prizes,
+          faqs,
+          teams: registeredTeams,
+          deletedTeamIds: deletedTeamIdsRef.current,
+        }),
       }).catch(() => {});
 
-      setTracks(initialTracks);
-      persistContentSection('tracks', initialTracks);
-
-      setPrizes(initialPrizes);
-      persistContentSection('prizes', initialPrizes);
-
-      setSchedule(initialSchedule);
-      persistContentSection('schedule', initialSchedule);
-
-      setRules(initialRules);
-      persistContentSection('rules', initialRules);
-
-      setFaqs(initialFAQs);
-      persistContentSection('faqs', initialFAQs);
-
-      setAnnouncements(initialAnnouncements);
-      setCoreTeam(initialCoreTeam);
-      Promise.all(initialCoreTeam.map(m => saveCoreMemberToFirestore(m))).catch(() => {});
-      fetch('/api/core-team/sync', {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ items: initialCoreTeam }),
-      }).catch(() => {});
-
-      setRegisteredTeams(initialRegisteredTeams);
-      setCurrentTeamSession(null);
       broadcastLiveSync('SYNC_ALL');
+      return { success: true, syncedAt: nowIso };
+    } catch (err) {
+      console.warn('syncAllToCloud warning:', err);
+      return { success: false, syncedAt: nowIso };
+    } finally {
+      setIsSyncingAll(false);
     }
+  };
+
+  const resetAllData = () => {
+    localStorage.clear();
+    const nowIso = new Date().toISOString();
+    const resetConfig = { ...initialEventConfig, updatedAt: nowIso };
+    deletedTeamIdsRef.current = [];
+    coreTeamIndexIdsRef.current = initialCoreTeam.map((m) => m.id);
+    recordSyncTimestamp('config', nowIso);
+    recordSyncTimestamp('deleted_teams', nowIso);
+    setEventConfig(resetConfig);
+    saveSiteConfigToFirestore(resetConfig, nowIso);
+    saveSiteContentToFirestore('deleted_teams', [], nowIso);
+    fetch('/api/config', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(resetConfig),
+    }).catch(() => {});
+
+    setTracks(initialTracks);
+    persistContentSection('tracks', initialTracks);
+
+    setPrizes(initialPrizes);
+    persistContentSection('prizes', initialPrizes);
+
+    setSchedule(initialSchedule);
+    persistContentSection('schedule', initialSchedule);
+
+    setRules(initialRules);
+    persistContentSection('rules', initialRules);
+
+    setFaqs(initialFAQs);
+    persistContentSection('faqs', initialFAQs);
+
+    setAnnouncements(initialAnnouncements);
+    persistAnnouncementsSnapshot(initialAnnouncements);
+
+    setCoreTeam(initialCoreTeam);
+    persistCoreTeamSnapshot(initialCoreTeam);
+
+    setRegisteredTeams(initialRegisteredTeams);
+    setCurrentTeamSession(null);
+    broadcastLiveSync('SYNC_ALL');
   };
 
   return (
@@ -1589,6 +1946,7 @@ export const HackathonProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         registeredTeams,
         registerTeam,
         updateTeam,
+        deleteTeam,
         updatePaymentStatus,
         toggleCheckIn,
         currentTeamSession,
@@ -1605,6 +1963,8 @@ export const HackathonProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         exportTeamsToCSV,
         exportTeamsToSQL,
         resetAllData,
+        syncAllToCloud,
+        isSyncingAll,
         googleUser,
         googleAccessToken,
         isGoogleSheetsConnected,

@@ -18,6 +18,8 @@ import {
 
 export const BottomDock: React.FC = () => {
   const {
+    eventConfig,
+    tracks,
     announcements,
     activeView,
     navigateTo,
@@ -25,6 +27,7 @@ export const BottomDock: React.FC = () => {
     showCoreTeamPanel,
     setShowCoreTeamPanel,
   } = useHackathon();
+  const activeTrackCount = tracks.filter((t) => t.active).length || tracks.length;
 
   const [collapsed, setCollapsed] = useState(false);
   const [mobileMoreOpen, setMobileMoreOpen] = useState(false);
@@ -118,7 +121,7 @@ export const BottomDock: React.FC = () => {
             >
               <Cpu className="w-4 h-4" />
               <span className="absolute -top-9 left-1/2 -translate-x-1/2 px-2 py-1 bg-[#0C1630] border border-[#35E0FF]/30 rounded text-[11px] font-mono text-white opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none whitespace-nowrap shadow-lg">
-                6 Tracks
+                {activeTrackCount} Tracks
               </span>
             </button>
 
@@ -129,7 +132,7 @@ export const BottomDock: React.FC = () => {
             >
               <UserPlus className="w-4 h-4" />
               <span className="absolute -top-9 left-1/2 -translate-x-1/2 px-2 py-1 bg-[#0C1630] border border-[#FF8A2A]/40 rounded text-[11px] font-mono text-amber-200 opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none whitespace-nowrap shadow-lg">
-                Register (₹100)
+                Register (₹{eventConfig.entryFee})
               </span>
             </button>
 
@@ -164,7 +167,7 @@ export const BottomDock: React.FC = () => {
             >
               <Trophy className="w-4 h-4" />
               <span className="absolute -top-9 left-1/2 -translate-x-1/2 px-2 py-1 bg-[#0C1630] border border-[#FFC83D]/30 rounded text-[11px] font-mono text-amber-200 opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none whitespace-nowrap shadow-lg">
-                ₹1 Lakh Prizes
+                ₹{eventConfig.prizePoolAmount.toLocaleString('en-IN')} Prizes
               </span>
             </button>
 
@@ -304,7 +307,7 @@ export const BottomDock: React.FC = () => {
                 className="flex items-center gap-2 p-3 bg-[#132247] rounded-xl text-left text-[#F2F6FF]"
               >
                 <Trophy className="w-4 h-4 text-[#FFC83D]" />
-                <span>₹1,00,000 Prizes</span>
+                <span>₹{eventConfig.prizePoolAmount.toLocaleString('en-IN')} Prizes</span>
               </button>
               <button
                 onClick={() => { scrollToSection('schedule'); setMobileMoreOpen(false); }}

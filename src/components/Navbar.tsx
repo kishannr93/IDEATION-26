@@ -14,6 +14,16 @@ export const Navbar: React.FC<NavbarProps> = ({ onOpenQR }) => {
   const [isDownloadingTemplate, setIsDownloadingTemplate] = useState(false);
 
   const handleDownloadTemplate = async () => {
+    if (eventConfig?.officialPptLink) {
+      const a = document.createElement('a');
+      a.href = eventConfig.officialPptLink;
+      a.target = '_blank';
+      a.rel = 'noopener noreferrer';
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      return;
+    }
     try {
       setIsDownloadingTemplate(true);
       await generatePptTemplate({
@@ -21,7 +31,7 @@ export const Navbar: React.FC<NavbarProps> = ({ onOpenQR }) => {
         teamId: 'IDN-SAMPLE',
         leaderName: 'Team Leader',
         track: 'Artificial Intelligence & Smart Systems',
-        college: 'Bapuji Institute of Engineering and Technology (BIET)',
+        college: eventConfig?.collegeName || 'Bapuji Institute of Engineering and Technology (BIET)',
         problemTitle: 'Official 8-Slide Pitch Deck Presentation Template',
         problemSummary: 'Official 8-slide template with Problem Statement, Proposed Solution, Technical Approach, Feasibility, Demo Plan, Architecture Canvas, and Submission Checklist.',
       });
@@ -35,7 +45,7 @@ export const Navbar: React.FC<NavbarProps> = ({ onOpenQR }) => {
   const pinnedAnnouncements = announcements.filter(a => a.pinned);
   const marqueeText = pinnedAnnouncements.length > 0 
     ? pinnedAnnouncements.map(a => `${a.title} — ${a.content}`).join('   ✦   ')
-    : 'Registrations Open for IDEATION 2026 ✦ 24-Hour Hackathon at BIET Davangere ✦ ₹1,00,000 Prize Pool ✦ 18 & 19 November';
+    : `${eventConfig.registrationOpen ? 'Registrations Open' : 'Portal Live'} for ${eventConfig.eventName} ✦ 24-Hour Hackathon at ${eventConfig.venue} ✦ ₹${eventConfig.prizePoolAmount.toLocaleString('en-IN')} Prize Pool ✦ ${eventConfig.dates}`;
 
   return (
     <header className="sticky top-0 z-40 w-full bg-[#050B1A]/90 backdrop-blur-md border-b border-[#35E0FF]/15">
@@ -247,9 +257,45 @@ export const Navbar: React.FC<NavbarProps> = ({ onOpenQR }) => {
               disabled={isDownloadingTemplate}
               className="py-2 text-left text-[#35E0FF] font-semibold border-b border-[#78AAFF]/10 flex items-center justify-between cursor-pointer"
             >
-              <span>{isDownloadingTemplate ? 'Generating PPT...' : 'Download PPT Template (.pptx)'}</span>
+              <span>{isDownloadingTemplate ? 'Generating PPT...' : eventConfig.officialPptLink ? 'Official PPT Template Link' : 'Download PPT Template (.pptx)'}</span>
               <Download className="w-4 h-4 text-[#35E0FF]" />
             </button>
+            {eventConfig.problemStatementsLink && (
+              <a
+                href={eventConfig.problemStatementsLink}
+                target="_blank"
+                rel="noopener noreferrer"
+                onClick={() => setMobileMenuOpen(false)}
+                className="py-2 text-left text-[#9DB0D0] hover:text-[#35E0FF] border-b border-[#78AAFF]/10 flex items-center justify-between"
+              >
+                <span>Problem Statements Repository</span>
+                <ArrowUpRight className="w-4 h-4 text-[#35E0FF]" />
+              </a>
+            )}
+            {eventConfig.brochurePdfLink && (
+              <a
+                href={eventConfig.brochurePdfLink}
+                target="_blank"
+                rel="noopener noreferrer"
+                onClick={() => setMobileMenuOpen(false)}
+                className="py-2 text-left text-[#9DB0D0] hover:text-[#35E0FF] border-b border-[#78AAFF]/10 flex items-center justify-between"
+              >
+                <span>Official Rulebook & Brochure</span>
+                <ArrowUpRight className="w-4 h-4 text-[#35E0FF]" />
+              </a>
+            )}
+            {eventConfig.whatsappGroupLink && (
+              <a
+                href={eventConfig.whatsappGroupLink}
+                target="_blank"
+                rel="noopener noreferrer"
+                onClick={() => setMobileMenuOpen(false)}
+                className="py-2 text-left text-emerald-400 font-semibold border-b border-[#78AAFF]/10 flex items-center justify-between"
+              >
+                <span>WhatsApp Community Group</span>
+                <ArrowUpRight className="w-4 h-4" />
+              </a>
+            )}
             <button
               onClick={() => { setMobileMenuOpen(false); navigateTo('dashboard'); }}
               className="py-2 text-left text-[#35E0FF] font-semibold border-b border-[#78AAFF]/10 cursor-pointer"
