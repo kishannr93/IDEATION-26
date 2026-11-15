@@ -217,9 +217,28 @@ export const HackathonProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     return initialPrizes;
   });
 
+  const normalizeScheduleDays = (items: ScheduleEvent[]): ScheduleEvent[] =>
+    items.map((ev) => {
+      const rawDay = String(ev.day || '');
+      if (rawDay === 'Day 1 (18 Nov)' || rawDay.includes('18 Nov')) {
+        return { ...ev, day: 'Day 1 (Dec 1)' };
+      }
+      if (rawDay === 'Day 2 (19 Nov)' || rawDay.includes('19 Nov')) {
+        return { ...ev, day: 'Day 2 (Dec 2)' };
+      }
+      return ev;
+    });
+
   const [schedule, setSchedule] = useState<ScheduleEvent[]>(() => {
     const saved = localStorage.getItem('ideation_schedule');
-    return saved ? JSON.parse(saved) : initialSchedule;
+    if (saved) {
+      try {
+        return normalizeScheduleDays(JSON.parse(saved));
+      } catch {
+        return initialSchedule;
+      }
+    }
+    return initialSchedule;
   });
 
   const [announcements, setAnnouncements] = useState<Announcement[]>(() => {
@@ -542,7 +561,7 @@ export const HackathonProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     const unsubSchedule = subscribeFirestoreSiteContent<ScheduleEvent>('schedule', (payload) => {
       if (shouldApplyRemoteUpdate('schedule', payload.updatedAt)) {
         recordSyncTimestamp('schedule', payload.updatedAt);
-        setSchedule(payload.items);
+        setSchedule(normalizeScheduleDays(payload.items));
       }
     });
 
@@ -764,7 +783,7 @@ export const HackathonProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       }
       if (snapshot.sections.schedule && shouldApplyRemoteUpdate('schedule', snapshot.sections.schedule.updatedAt)) {
         recordSyncTimestamp('schedule', snapshot.sections.schedule.updatedAt);
-        setSchedule(snapshot.sections.schedule.items as ScheduleEvent[]);
+        setSchedule(normalizeScheduleDays(snapshot.sections.schedule.items as ScheduleEvent[]));
       }
       if (snapshot.sections.tracks && shouldApplyRemoteUpdate('tracks', snapshot.sections.tracks.updatedAt)) {
         recordSyncTimestamp('tracks', snapshot.sections.tracks.updatedAt);
@@ -853,7 +872,7 @@ export const HackathonProvider: React.FC<{ children: React.ReactNode }> = ({ chi
             }
             if (json.schedule && Array.isArray(json.schedule.items) && shouldApplyRemoteUpdate('schedule', json.schedule.updatedAt)) {
               recordSyncTimestamp('schedule', json.schedule.updatedAt);
-              setSchedule(json.schedule.items);
+              setSchedule(normalizeScheduleDays(json.schedule.items));
             }
             if (json.tracks && Array.isArray(json.tracks.items) && shouldApplyRemoteUpdate('tracks', json.tracks.updatedAt)) {
               recordSyncTimestamp('tracks', json.tracks.updatedAt);

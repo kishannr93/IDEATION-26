@@ -97,7 +97,7 @@ export interface ScheduleEvent {
   time: string;
   title: string;
   description: string;
-  day: 'Day 1 (18 Nov)' | 'Day 2 (19 Nov)';
+  day: 'Day 1 (Dec 1)' | 'Day 2 (Dec 2)';
   category: 'Milestone' | 'Mentoring' | 'Food & Break' | 'Judging' | 'Ceremony';
 }
 

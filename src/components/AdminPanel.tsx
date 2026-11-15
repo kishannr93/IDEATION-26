@@ -521,7 +521,7 @@ export const AdminPanel: React.FC = () => {
     title: '',
     description: '',
     category: 'Milestone',
-    day: 'Day 1 (18 Nov)',
+    day: 'Day 1 (Dec 1)',
   });
   const [editingScheduleId, setEditingScheduleId] = useState<string | null>(null);
   const [editingScheduleForm, setEditingScheduleForm] = useState<Partial<ScheduleEvent>>({});
@@ -3573,7 +3573,7 @@ export const AdminPanel: React.FC = () => {
                         title: '',
                         description: '',
                         category: 'Milestone',
-                        day: 'Day 1 (18 Nov)',
+                        day: 'Day 1 (Dec 1)',
                       });
                     }}
                     className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs"
@@ -3601,8 +3601,8 @@ export const AdminPanel: React.FC = () => {
                         }
                         className="w-full px-3 py-2 bg-[#081024] border border-[#78AAFF]/20 rounded-xl text-white focus:outline-none focus:border-[#35E0FF]"
                       >
-                        <option value="Day 1 (18 Nov)">Day 1 (18 Nov)</option>
-                        <option value="Day 2 (19 Nov)">Day 2 (19 Nov)</option>
+                        <option value="Day 1 (Dec 1)">Day 1 (Dec 1)</option>
+                        <option value="Day 2 (Dec 2)">Day 2 (Dec 2)</option>
                       </select>
                     </div>
 
@@ -3696,7 +3696,7 @@ export const AdminPanel: React.FC = () => {
                               <div>
                                 <label className="block text-[#9DB0D0] mb-0.5">Day</label>
                                 <select
-                                  value={editingScheduleForm.day || 'Day 1 (18 Nov)'}
+                                  value={editingScheduleForm.day || 'Day 1 (Dec 1)'}
                                   onChange={(e) =>
                                     setEditingScheduleForm({
                                       ...editingScheduleForm,
@@ -3705,8 +3705,8 @@ export const AdminPanel: React.FC = () => {
                                   }
                                   className="w-full px-2.5 py-1.5 bg-[#0C1630] border border-[#35E0FF]/40 rounded-lg text-white"
                                 >
-                                  <option value="Day 1 (18 Nov)">Day 1 (18 Nov)</option>
-                                  <option value="Day 2 (19 Nov)">Day 2 (19 Nov)</option>
+                                  <option value="Day 1 (Dec 1)">Day 1 (Dec 1)</option>
+                                  <option value="Day 2 (Dec 2)">Day 2 (Dec 2)</option>
                                 </select>
                               </div>
                               <div>

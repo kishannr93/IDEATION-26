@@ -185,7 +185,7 @@ export const initialPrizes: PrizeItem[] = [
 export const initialSchedule: ScheduleEvent[] = [
   {
     id: 's1',
-    day: 'Day 1 (18 Nov)',
+    day: 'Day 1 (Dec 1)',
     time: '08:00 AM - 09:15 AM',
     title: 'Reporting, Kit Distribution & Desk Verification',
     description: 'Teams arrive at BIET Main Auditorium, verify IDs, receive event badges, WiFi credentials and welcome swag kit.',
@@ -193,7 +193,7 @@ export const initialSchedule: ScheduleEvent[] = [
   },
   {
     id: 's2',
-    day: 'Day 1 (18 Nov)',
+    day: 'Day 1 (Dec 1)',
     time: '09:30 AM - 10:15 AM',
     title: 'Inauguration Ceremony & Keynote Address',
     description: 'Opening addresses by dignitaries, Institute Leadership, and Anveshan Club Faculty in-charge.',
@@ -201,7 +201,7 @@ export const initialSchedule: ScheduleEvent[] = [
   },
   {
     id: 's3',
-    day: 'Day 1 (18 Nov)',
+    day: 'Day 1 (Dec 1)',
     time: '10:30 AM',
     title: '24-Hour Hackathon Timer Starts!',
     description: 'The countdown clock begins. Teams occupy allotted lab bays and begin prototyping immediately.',
@@ -209,7 +209,7 @@ export const initialSchedule: ScheduleEvent[] = [
   },
   {
     id: 's4',
-    day: 'Day 1 (18 Nov)',
+    day: 'Day 1 (Dec 1)',
     time: '01:00 PM - 02:00 PM',
     title: 'Power Lunch & Networking',
     description: 'Buffet lunch served in BIET Student Centre. Relax, refuel, and exchange ideas.',
@@ -217,7 +217,7 @@ export const initialSchedule: ScheduleEvent[] = [
   },
   {
     id: 's5',
-    day: 'Day 1 (18 Nov)',
+    day: 'Day 1 (Dec 1)',
     time: '02:30 PM - 04:30 PM',
     title: 'Mentoring Round 1: Architecture & Feasibility',
     description: 'Domain experts and industry mentors review wireframes, circuit schematics, and technical viability.',
@@ -225,7 +225,7 @@ export const initialSchedule: ScheduleEvent[] = [
   },
   {
     id: 's6',
-    day: 'Day 1 (18 Nov)',
+    day: 'Day 1 (Dec 1)',
     time: '05:30 PM - 06:15 PM',
     title: 'High Tea & Lightning Pitches',
     description: 'Tea, Davangere snacks, and quick 60-second progress shout-outs across track bays.',
@@ -233,7 +233,7 @@ export const initialSchedule: ScheduleEvent[] = [
   },
   {
     id: 's7',
-    day: 'Day 1 (18 Nov)',
+    day: 'Day 1 (Dec 1)',
     time: '08:30 PM - 09:30 PM',
     title: 'Dinner & Energy Boost',
     description: 'Full course dinner served. Music and casual icebreakers in the lounge.',
@@ -241,7 +241,7 @@ export const initialSchedule: ScheduleEvent[] = [
   },
   {
     id: 's8',
-    day: 'Day 1 (18 Nov)',
+    day: 'Day 1 (Dec 1)',
     time: '11:45 PM - 12:45 AM',
     title: 'Midnight Surprise Challenge & Midnight Snacks',
     description: 'Optional fast-paced coding/hardware puzzle to win instant surprise cash prizes and Red Bull refreshments.',
@@ -249,7 +249,7 @@ export const initialSchedule: ScheduleEvent[] = [
   },
   {
     id: 's9',
-    day: 'Day 2 (19 Nov)',
+    day: 'Day 2 (Dec 2)',
     time: '03:00 AM - 04:00 AM',
     title: 'Late Night Coffee & Dev Support Clinic',
     description: 'Hot filter coffee, tea, and mentor station open for debugging stubborn race conditions and hardware glitches.',
@@ -257,7 +257,7 @@ export const initialSchedule: ScheduleEvent[] = [
   },
   {
     id: 's10',
-    day: 'Day 2 (19 Nov)',
+    day: 'Day 2 (Dec 2)',
     time: '07:30 AM - 08:30 AM',
     title: 'Breakfast & Final Sprint',
     description: 'South Indian breakfast served. Teams prepare final slide decks, live demos, and GitHub repositories.',
@@ -265,7 +265,7 @@ export const initialSchedule: ScheduleEvent[] = [
   },
   {
     id: 's11',
-    day: 'Day 2 (19 Nov)',
+    day: 'Day 2 (Dec 2)',
     time: '10:30 AM',
     title: 'Code Freeze & Hackathon Concludes (24 Hours Complete)',
     description: 'The 24:00:00 timer stops! All repository pushes and prototype freeze officially in place.',
@@ -273,7 +273,7 @@ export const initialSchedule: ScheduleEvent[] = [
   },
   {
     id: 's12',
-    day: 'Day 2 (19 Nov)',
+    day: 'Day 2 (Dec 2)',
     time: '11:00 AM - 01:30 PM',
     title: 'Jury Evaluation & Live Prototype Demonstrations',
     description: 'Three parallel judging panels evaluate working hardware and software deployments.',
@@ -281,7 +281,7 @@ export const initialSchedule: ScheduleEvent[] = [
   },
   {
     id: 's13',
-    day: 'Day 2 (19 Nov)',
+    day: 'Day 2 (Dec 2)',
     time: '02:30 PM - 04:00 PM',
     title: 'Valedictory & ₹1,00,000 Grand Prize Ceremony',
     description: 'Announcement of winners, trophy distribution, certificates, and closing remarks.',

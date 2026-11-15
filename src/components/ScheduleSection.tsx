@@ -56,11 +56,11 @@ export const ScheduleSection: React.FC = () => {
     title: '',
     description: '',
     category: 'Milestone',
-    day: 'Day 1 (18 Nov)',
+    day: 'Day 1 (Dec 1)',
   });
 
   const dayTabs = Array.from(
-    new Set(['Day 1 (18 Nov)', 'Day 2 (19 Nov)', ...schedule.map((s) => s.day)])
+    new Set(['Day 1 (Dec 1)', 'Day 2 (Dec 2)', ...schedule.map((s) => s.day)])
   ).filter(Boolean);
 
   const filteredSchedule =
@@ -129,7 +129,7 @@ export const ScheduleSection: React.FC = () => {
       title: '',
       description: '',
       category: 'Milestone',
-      day: 'Day 1 (18 Nov)',
+      day: 'Day 1 (Dec 1)',
     });
     setShowAddForm(false);
   };
@@ -285,8 +285,8 @@ export const ScheduleSection: React.FC = () => {
                     onChange={(e) => setNewEvent({ ...newEvent, day: e.target.value as any })}
                     className="w-full px-3 py-2 bg-[#081024] border border-[#78AAFF]/20 rounded-xl text-white focus:outline-none focus:border-[#35E0FF]"
                   >
-                    <option value="Day 1 (18 Nov)">Day 1 (18 Nov)</option>
-                    <option value="Day 2 (19 Nov)">Day 2 (19 Nov)</option>
+                    <option value="Day 1 (Dec 1)">Day 1 (Dec 1)</option>
+                    <option value="Day 2 (Dec 2)">Day 2 (Dec 2)</option>
                   </select>
                 </div>
 
@@ -377,12 +377,12 @@ export const ScheduleSection: React.FC = () => {
                         <div>
                           <label className="block text-[11px] text-[#9DB0D0] mb-1">Day</label>
                           <select
-                            value={editForm.day || 'Day 1 (18 Nov)'}
+                            value={editForm.day || 'Day 1 (Dec 1)'}
                             onChange={(e) => setEditForm({ ...editForm, day: e.target.value as any })}
                             className="w-full px-2.5 py-1.5 bg-[#081024] border border-[#35E0FF]/40 rounded-lg text-white"
                           >
-                            <option value="Day 1 (18 Nov)">Day 1 (18 Nov)</option>
-                            <option value="Day 2 (19 Nov)">Day 2 (19 Nov)</option>
+                            <option value="Day 1 (Dec 1)">Day 1 (Dec 1)</option>
+                            <option value="Day 2 (Dec 2)">Day 2 (Dec 2)</option>
                           </select>
                         </div>
                         <div>
