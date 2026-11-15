@@ -1,8 +1,10 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useHackathon } from '../context/HackathonContext';
 import { RegisteredTeam, DomainTrack, Announcement, CoreTeamMember, ScheduleEvent, RuleItem, ProjectSubmission, SubmissionNotification } from '../types';
 import { sendTransactionalEmail, generatePassEmailHtml } from '../lib/email';
 import { AdminQRScanner } from './AdminQRScanner';
+import { AdminRealtimeToasts, AdminRealtimeToast, playAdminNotificationTone } from './AdminRealtimeToasts';
+import { supabase, isSupabaseConfigured } from '../lib/supabase';
 import { generatePptTemplate } from '../lib/pptTemplate';
 import {
   ShieldCheck,
@@ -43,6 +45,8 @@ import {
   X,
   MessageSquare,
   Check,
+  Volume2,
+  VolumeX,
 } from 'lucide-react';
 
 export const AdminPanel: React.FC = () => {
@@ -159,6 +163,226 @@ export const AdminPanel: React.FC = () => {
 
   // Notifications Dropdown State
   const [showNotificationDropdown, setShowNotificationDropdown] = useState(false);
+
+  // Real-time Registration & Payment Toast Notifications State
+  const [realtimeToasts, setRealtimeToasts] = useState<AdminRealtimeToast[]>([]);
+  const [toastSoundEnabled, setToastSoundEnabled] = useState<boolean>(true);
+  const knownTeamsMapRef = useRef<Map<string, 'Pending' | 'Verified' | 'Rejected'> | null>(null);
+  const recentToastDedupeRef = useRef<Map<string, number>>(new Map());
+  const toastTimersRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
+
+  const dismissRealtimeToast = useCallback((id: string) => {
+    const existingTimer = toastTimersRef.current.get(id);
+    if (existingTimer) {
+      clearTimeout(existingTimer);
+      toastTimersRef.current.delete(id);
+    }
+    setRealtimeToasts((prev) => prev.filter((t) => t.id !== id));
+  }, []);
+
+  const pushRealtimeToast = useCallback(
+    (
+      payload: Omit<AdminRealtimeToast, 'id' | 'createdAt'>,
+      dedupeKey: string
+    ) => {
+      const now = Date.now();
+      // Prune stale dedupe keys (> 15s)
+      recentToastDedupeRef.current.forEach((ts, key) => {
+        if (now - ts > 15000) recentToastDedupeRef.current.delete(key);
+      });
+
+      const lastShown = recentToastDedupeRef.current.get(dedupeKey);
+      if (lastShown && now - lastShown < 6000) {
+        return;
+      }
+      recentToastDedupeRef.current.set(dedupeKey, now);
+
+      const id = `toast-${now}-${Math.random().toString(36).slice(2, 7)}`;
+      const newToast: AdminRealtimeToast = {
+        ...payload,
+        id,
+        createdAt: new Date().toISOString(),
+      };
+
+      setRealtimeToasts((prev) => [newToast, ...prev].slice(0, 4));
+
+      if (toastSoundEnabled) {
+        playAdminNotificationTone(payload.type);
+      }
+
+      const timer = setTimeout(() => {
+        dismissRealtimeToast(id);
+      }, 8500);
+      toastTimersRef.current.set(id, timer);
+    },
+    [toastSoundEnabled, dismissRealtimeToast]
+  );
+
+  // Cleanup active toast timers on unmount
+  useEffect(() => {
+    return () => {
+      toastTimersRef.current.forEach((timer) => clearTimeout(timer));
+      toastTimersRef.current.clear();
+    };
+  }, []);
+
+  // Primary Supabase Real-Time Postgres Changes Listener (teams INSERT & UPDATE)
+  useEffect(() => {
+    const client = supabase;
+    if (!isAdminAuthenticated || !isSupabaseConfigured || !client) {
+      return;
+    }
+
+    const channel = client
+      .channel('admin-panel-teams-realtime')
+      .on(
+        'postgres_changes',
+        { event: 'INSERT', schema: 'public', table: 'teams' },
+        (payload) => {
+          const row = payload.new as Record<string, any> | undefined;
+          if (!row || !row.id) return;
+
+          const teamId = String(row.id);
+          const teamName = String(row.team_name || 'New Team');
+          const college = row.college ? String(row.college) : '';
+          const track = row.primary_track ? String(row.primary_track) : '';
+          const payStatus =
+            (row.payment_status as 'Pending' | 'Verified' | 'Rejected') || 'Pending';
+
+          knownTeamsMapRef.current?.set(teamId, payStatus);
+
+          pushRealtimeToast(
+            {
+              type: 'registration',
+              teamId,
+              teamName,
+              title: 'New Team Registration',
+              description: `${teamName} registered${college ? ` from ${college}` : ''}${track ? ` · ${track}` : ''}.`,
+              status: payStatus,
+              track,
+              college,
+              source: 'supabase',
+            },
+            `reg:${teamId}`
+          );
+        }
+      )
+      .on(
+        'postgres_changes',
+        { event: 'UPDATE', schema: 'public', table: 'teams' },
+        (payload) => {
+          const newRow = payload.new as Record<string, any> | undefined;
+          const oldRow = payload.old as Record<string, any> | undefined;
+          if (!newRow || !newRow.id) return;
+
+          const teamId = String(newRow.id);
+          const newStatus = newRow.payment_status as
+            | 'Pending'
+            | 'Verified'
+            | 'Rejected'
+            | undefined;
+          const prevStatus =
+            (oldRow?.payment_status as 'Pending' | 'Verified' | 'Rejected' | undefined) ||
+            knownTeamsMapRef.current?.get(teamId);
+
+          if (!newStatus || prevStatus === newStatus) {
+            return;
+          }
+
+          knownTeamsMapRef.current?.set(teamId, newStatus);
+          const teamName = String(newRow.team_name || teamId);
+
+          pushRealtimeToast(
+            {
+              type: 'payment',
+              teamId,
+              teamName,
+              title: `Payment Status: ${newStatus}`,
+              description: prevStatus
+                ? `${teamName} payment updated from ${prevStatus} to ${newStatus}.`
+                : `${teamName} payment status changed to ${newStatus}.`,
+              status: newStatus,
+              source: 'supabase',
+            },
+            `pay:${teamId}:${newStatus}`
+          );
+        }
+      )
+      .subscribe();
+
+    return () => {
+      client.removeChannel(channel);
+    };
+  }, [isAdminAuthenticated, pushRealtimeToast]);
+
+  // Real-Time Diff Tracker across multi-device sync updates (ensures alerts even if Supabase keys are omitted)
+  useEffect(() => {
+    if (!isAdminAuthenticated) {
+      knownTeamsMapRef.current = null;
+      setRealtimeToasts([]);
+      return;
+    }
+
+    if (!knownTeamsMapRef.current) {
+      const initialMap = new Map<string, 'Pending' | 'Verified' | 'Rejected'>();
+      registeredTeams.forEach((team) => {
+        initialMap.set(team.id, team.paymentStatus);
+      });
+      knownTeamsMapRef.current = initialMap;
+      return;
+    }
+
+    const prevMap = knownTeamsMapRef.current;
+    registeredTeams.forEach((team) => {
+      const prevStatus = prevMap.get(team.id);
+      if (prevStatus === undefined) {
+        prevMap.set(team.id, team.paymentStatus);
+        pushRealtimeToast(
+          {
+            type: 'registration',
+            teamId: team.id,
+            teamName: team.teamName,
+            title: 'New Team Registration',
+            description: `${team.teamName} registered from ${team.college} · ${team.primaryTrack}.`,
+            status: team.paymentStatus,
+            track: team.primaryTrack,
+            college: team.college,
+            source: 'sync',
+          },
+          `reg:${team.id}`
+        );
+      } else if (prevStatus !== team.paymentStatus) {
+        prevMap.set(team.id, team.paymentStatus);
+        pushRealtimeToast(
+          {
+            type: 'payment',
+            teamId: team.id,
+            teamName: team.teamName,
+            title: `Payment Status: ${team.paymentStatus}`,
+            description: `${team.teamName} payment updated from ${prevStatus} to ${team.paymentStatus}.`,
+            status: team.paymentStatus,
+            source: 'sync',
+          },
+          `pay:${team.id}:${team.paymentStatus}`
+        );
+      }
+    });
+  }, [isAdminAuthenticated, registeredTeams, pushRealtimeToast]);
+
+  const handleRealtimeToastAction = useCallback(
+    (toast: AdminRealtimeToast) => {
+      dismissRealtimeToast(toast.id);
+      const matched = registeredTeams.find((t) => t.id === toast.teamId);
+      if (toast.type === 'registration') {
+        setActiveTab('teams');
+        if (matched) setSelectedTeamModal(matched);
+      } else {
+        setActiveTab('payments');
+        if (matched) setSelectedTeamModal(matched);
+      }
+    },
+    [registeredTeams, dismissRealtimeToast]
+  );
 
   // Project PPT Submissions Tab State
   const [submissionSearch, setSubmissionSearch] = useState('');
@@ -588,6 +812,13 @@ export const AdminPanel: React.FC = () => {
 
   return (
     <div className="min-h-screen py-10 px-4 sm:px-6 lg:px-8 bg-[#050B1A] text-white">
+      {isAdminAuthenticated && (
+        <AdminRealtimeToasts
+          toasts={realtimeToasts}
+          onDismiss={dismissRealtimeToast}
+          onAction={handleRealtimeToastAction}
+        />
+      )}
       <div className="max-w-7xl mx-auto">
         {/* Top Header */}
         <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 pb-6 mb-8 border-b border-[#78AAFF]/20">
@@ -614,6 +845,28 @@ export const AdminPanel: React.FC = () => {
 
             {isAdminAuthenticated && (
               <div className="flex items-center gap-2.5 sm:gap-3">
+                {/* Alert Sound Mute / Unmute Toggle */}
+                <button
+                  type="button"
+                  onClick={() => setToastSoundEnabled((prev) => !prev)}
+                  className={`p-2 rounded-xl border transition-colors cursor-pointer ${
+                    toastSoundEnabled
+                      ? 'text-[#35E0FF] bg-[#35E0FF]/10 border-[#35E0FF]/30 hover:bg-[#35E0FF]/20'
+                      : 'text-[#9DB0D0] bg-[#0C1630] border-[#78AAFF]/20 hover:text-white'
+                  }`}
+                  title={
+                    toastSoundEnabled
+                      ? 'Mute real-time registration & payment alert chimes'
+                      : 'Unmute real-time registration & payment alert chimes'
+                  }
+                >
+                  {toastSoundEnabled ? (
+                    <Volume2 className="w-4 h-4" />
+                  ) : (
+                    <VolumeX className="w-4 h-4" />
+                  )}
+                </button>
+
                 {/* Download PPT Template Button */}
                 <button
                   onClick={handleAdminDownloadTemplate}

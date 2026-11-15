@@ -19,6 +19,10 @@ const DB_FILE = path.join(DATA_DIR, 'central_database.json');
 const CONFIG_FILE = path.join(DATA_DIR, 'event_config.json');
 const ANNOUNCEMENTS_FILE = path.join(DATA_DIR, 'announcements.json');
 const CORE_TEAM_FILE = path.join(DATA_DIR, 'core_team.json');
+const VALID_CONTENT_SECTIONS = ['rules', 'schedule', 'tracks', 'prizes', 'faqs'] as const;
+type ContentSection = (typeof VALID_CONTENT_SECTIONS)[number];
+
+const getContentFilePath = (section: ContentSection) => path.join(DATA_DIR, `content_${section}.json`);
 
 // Ensure data directory exists
 if (!fs.existsSync(DATA_DIR)) {
@@ -36,6 +40,19 @@ function readJsonFile<T>(filePath: string, defaultValue: T): T {
   } catch (err) {
     console.error(`Error reading ${filePath}:`, err);
     return defaultValue;
+  }
+}
+
+function readOptionalJsonFile<T>(filePath: string): T | null {
+  try {
+    if (!fs.existsSync(filePath)) {
+      return null;
+    }
+    const raw = fs.readFileSync(filePath, 'utf-8');
+    return JSON.parse(raw) as T;
+  } catch (err) {
+    console.error(`Error reading optional ${filePath}:`, err);
+    return null;
   }
 }
 
@@ -625,7 +642,7 @@ app.post('/api/config', (req: Request, res: Response) => {
   const updated = {
     ...current,
     ...body,
-    updatedAt: new Date().toISOString(),
+    updatedAt: body?.updatedAt || new Date().toISOString(),
   };
   writeJsonFile(CONFIG_FILE, updated);
   return res.json({ success: true, data: updated });
@@ -667,6 +684,15 @@ app.post('/api/announcements', (req: Request, res: Response) => {
   return res.json({ success: true, data: announcements });
 });
 
+app.put('/api/announcements/sync', (req: Request, res: Response) => {
+  const { items } = req.body as { items?: any[] };
+  if (!Array.isArray(items)) {
+    return res.status(400).json({ success: false, error: 'items array is required' });
+  }
+  writeJsonFile(ANNOUNCEMENTS_FILE, items);
+  return res.json({ success: true, data: items });
+});
+
 app.delete('/api/announcements/:id', (req: Request, res: Response) => {
   const id = req.params.id;
   const announcements = readJsonFile<any[]>(ANNOUNCEMENTS_FILE, []);
@@ -691,6 +717,9 @@ app.post('/api/core-team', (req: Request, res: Response) => {
 
   if (existingIdx >= 0) {
     members[existingIdx] = { ...members[existingIdx], ...member };
+    if (member.photoUrl === undefined || member.photoUrl === null || member.photoUrl === '') {
+      delete members[existingIdx].photoUrl;
+    }
   } else {
     members.push({
       ...member,
@@ -703,6 +732,15 @@ app.post('/api/core-team', (req: Request, res: Response) => {
   return res.json({ success: true, data: members });
 });
 
+app.put('/api/core-team/sync', (req: Request, res: Response) => {
+  const { items } = req.body as { items?: any[] };
+  if (!Array.isArray(items)) {
+    return res.status(400).json({ success: false, error: 'items array is required' });
+  }
+  writeJsonFile(CORE_TEAM_FILE, items);
+  return res.json({ success: true, data: items });
+});
+
 app.delete('/api/core-team/:id', (req: Request, res: Response) => {
   const id = req.params.id;
   const members = readJsonFile<any[]>(CORE_TEAM_FILE, []);
@@ -711,12 +749,45 @@ app.delete('/api/core-team/:id', (req: Request, res: Response) => {
   return res.json({ success: true, data: filtered });
 });
 
+// 5.95 GET & UPDATE DYNAMIC CONTENT SECTIONS (RULES, SCHEDULE, TRACKS, PRIZES, FAQS)
+app.get('/api/content/:section', (req: Request, res: Response) => {
+  const section = req.params.section as ContentSection;
+  if (!VALID_CONTENT_SECTIONS.includes(section)) {
+    return res.status(400).json({ success: false, error: 'Invalid content section' });
+  }
+  const stored = readOptionalJsonFile<{ section: string; items: any[]; updatedAt: string }>(getContentFilePath(section));
+  return res.json({ success: true, data: stored });
+});
+
+app.post('/api/content/:section', (req: Request, res: Response) => {
+  const section = req.params.section as ContentSection;
+  if (!VALID_CONTENT_SECTIONS.includes(section)) {
+    return res.status(400).json({ success: false, error: 'Invalid content section' });
+  }
+  const { items, updatedAt } = req.body as { items?: any[]; updatedAt?: string };
+  if (!Array.isArray(items)) {
+    return res.status(400).json({ success: false, error: 'items array is required' });
+  }
+  const payload = {
+    section,
+    items,
+    updatedAt: updatedAt || new Date().toISOString(),
+  };
+  writeJsonFile(getContentFilePath(section), payload);
+  return res.json({ success: true, data: payload });
+});
+
 // 5.10 UNIVERSAL CENTRAL SYNC (ALL DATA AT ONCE)
 app.get('/api/sync/all', (_req: Request, res: Response) => {
   const teams = readDatabase();
   const config = readJsonFile(CONFIG_FILE, null);
   const announcements = readJsonFile(ANNOUNCEMENTS_FILE, []);
   const coreTeam = readJsonFile(CORE_TEAM_FILE, []);
+  const rules = readOptionalJsonFile<{ section: string; items: any[]; updatedAt: string }>(getContentFilePath('rules'));
+  const schedule = readOptionalJsonFile<{ section: string; items: any[]; updatedAt: string }>(getContentFilePath('schedule'));
+  const tracks = readOptionalJsonFile<{ section: string; items: any[]; updatedAt: string }>(getContentFilePath('tracks'));
+  const prizes = readOptionalJsonFile<{ section: string; items: any[]; updatedAt: string }>(getContentFilePath('prizes'));
+  const faqs = readOptionalJsonFile<{ section: string; items: any[]; updatedAt: string }>(getContentFilePath('faqs'));
 
   return res.json({
     success: true,
@@ -725,6 +796,11 @@ app.get('/api/sync/all', (_req: Request, res: Response) => {
     config,
     announcements,
     coreTeam,
+    rules,
+    schedule,
+    tracks,
+    prizes,
+    faqs,
   });
 });
 

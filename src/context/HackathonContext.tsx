@@ -42,6 +42,9 @@ import {
   saveCoreMemberToFirestore,
   deleteCoreMemberFromFirestore,
   subscribeFirestoreCoreTeam,
+  saveSiteContentToFirestore,
+  subscribeFirestoreSiteContent,
+  SiteContentSection,
 } from '../lib/firebase';
 import {
   syncAllTeamsToGoogleSheet,
@@ -264,6 +267,38 @@ export const HackathonProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   });
   const isGoogleSheetsConnected = Boolean(googleUser || googleAccessToken);
 
+  // Timestamp map for conflict-free cross-device sync (ms since epoch)
+  const syncTimestampsRef = React.useRef<Record<string, number>>((() => {
+    try {
+      const saved = localStorage.getItem('ideation_sync_timestamps');
+      return saved ? JSON.parse(saved) : {};
+    } catch {
+      return {};
+    }
+  })());
+
+  const recordSyncTimestamp = (key: string, isoOrMs?: string | number): number => {
+    const ms =
+      typeof isoOrMs === 'number'
+        ? isoOrMs
+        : isoOrMs
+        ? Date.parse(isoOrMs) || Date.now()
+        : Date.now();
+    syncTimestampsRef.current[key] = ms;
+    try {
+      localStorage.setItem('ideation_sync_timestamps', JSON.stringify(syncTimestampsRef.current));
+    } catch {}
+    return ms;
+  };
+
+  const shouldApplyRemoteUpdate = (key: string, remoteUpdatedAt?: string): boolean => {
+    const localTs = syncTimestampsRef.current[key] || 0;
+    if (!remoteUpdatedAt) return localTs === 0;
+    const remoteTs = Date.parse(remoteUpdatedAt) || 0;
+    if (localTs === 0) return true;
+    return remoteTs > localTs;
+  };
+
   // Project PPT Submissions & Admin Alerts State
   const [submissionNotifications, setSubmissionNotifications] = useState<SubmissionNotification[]>(() => {
     const saved = localStorage.getItem('ideation_submission_notifications');
@@ -316,12 +351,15 @@ export const HackathonProvider: React.FC<{ children: React.ReactNode }> = ({ chi
 
     const unsubConfig = subscribeFirestoreSiteConfig((remoteConfig) => {
       if (remoteConfig && Object.keys(remoteConfig).length > 0) {
-        setEventConfig((prev) => ({ ...prev, ...remoteConfig }));
+        if (shouldApplyRemoteUpdate('config', remoteConfig.updatedAt)) {
+          recordSyncTimestamp('config', remoteConfig.updatedAt);
+          setEventConfig((prev) => ({ ...prev, ...remoteConfig }));
+        }
       }
     });
 
-    const unsubAnnouncements = subscribeFirestoreAnnouncements((remoteAnnouncements) => {
-      if (remoteAnnouncements && remoteAnnouncements.length > 0) {
+    const unsubAnnouncements = subscribeFirestoreAnnouncements((remoteAnnouncements, fromServer) => {
+      if (remoteAnnouncements && (remoteAnnouncements.length > 0 || fromServer)) {
         setAnnouncements(remoteAnnouncements);
       }
     });
@@ -332,14 +370,59 @@ export const HackathonProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       }
     });
 
+    // Live cross-device subscriptions for Rules, Schedule, Tracks, Prizes, and FAQs
+    const unsubRules = subscribeFirestoreSiteContent<RuleItem>('rules', (payload) => {
+      if (shouldApplyRemoteUpdate('rules', payload.updatedAt)) {
+        recordSyncTimestamp('rules', payload.updatedAt);
+        setRules(payload.items);
+      }
+    });
+
+    const unsubSchedule = subscribeFirestoreSiteContent<ScheduleEvent>('schedule', (payload) => {
+      if (shouldApplyRemoteUpdate('schedule', payload.updatedAt)) {
+        recordSyncTimestamp('schedule', payload.updatedAt);
+        setSchedule(payload.items);
+      }
+    });
+
+    const unsubTracks = subscribeFirestoreSiteContent<DomainTrack>('tracks', (payload) => {
+      if (shouldApplyRemoteUpdate('tracks', payload.updatedAt)) {
+        recordSyncTimestamp('tracks', payload.updatedAt);
+        setTracks(payload.items);
+      }
+    });
+
+    const unsubPrizes = subscribeFirestoreSiteContent<PrizeItem>('prizes', (payload) => {
+      if (shouldApplyRemoteUpdate('prizes', payload.updatedAt)) {
+        recordSyncTimestamp('prizes', payload.updatedAt);
+        setPrizes(payload.items);
+      }
+    });
+
+    const unsubFaqs = subscribeFirestoreSiteContent<FAQItem>('faqs', (payload) => {
+      if (shouldApplyRemoteUpdate('faqs', payload.updatedAt)) {
+        recordSyncTimestamp('faqs', payload.updatedAt);
+        setFAQsSafe(payload.items);
+      }
+    });
+
     return () => {
       unsubAuth();
       unsubTeams();
       unsubConfig();
       unsubAnnouncements();
       unsubCoreTeam();
+      unsubRules();
+      unsubSchedule();
+      unsubTracks();
+      unsubPrizes();
+      unsubFaqs();
     };
   }, []);
+
+  const setFAQsSafe = (items: FAQItem[]) => {
+    setFaqs(items);
+  };
 
   const connectGoogleSheets = async (): Promise<boolean> => {
     try {
@@ -475,7 +558,20 @@ export const HackathonProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     }
   };
 
-  // Central Database Synchronization & Live Polling (Teams, Config, News, Team)
+  // Persist structured content section globally (Firestore + Central Express DB + BroadcastChannel)
+  const persistContentSection = <T,>(section: SiteContentSection, items: T[]) => {
+    const nowIso = new Date().toISOString();
+    recordSyncTimestamp(section, nowIso);
+    saveSiteContentToFirestore(section, items, nowIso);
+    fetch(`/api/content/${section}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ items, updatedAt: nowIso }),
+    }).catch(() => {});
+    broadcastLiveSync(`SYNC_${section.toUpperCase()}`);
+  };
+
+  // Central Database Synchronization & Live Polling (Teams, Config, News, Team, Rules, Schedule, Tracks, Prizes, FAQs)
   useEffect(() => {
     let isMounted = true;
 
@@ -495,13 +591,36 @@ export const HackathonProvider: React.FC<{ children: React.ReactNode }> = ({ chi
               }
             }
             if (json.config && typeof json.config === 'object' && Object.keys(json.config).length > 0) {
-              setEventConfig(prev => ({ ...prev, ...json.config }));
+              if (shouldApplyRemoteUpdate('config', json.config.updatedAt)) {
+                recordSyncTimestamp('config', json.config.updatedAt);
+                setEventConfig(prev => ({ ...prev, ...json.config }));
+              }
             }
             if (Array.isArray(json.announcements) && json.announcements.length > 0) {
               setAnnouncements(json.announcements);
             }
             if (Array.isArray(json.coreTeam) && json.coreTeam.length > 0) {
               setCoreTeam(json.coreTeam);
+            }
+            if (json.rules && Array.isArray(json.rules.items) && shouldApplyRemoteUpdate('rules', json.rules.updatedAt)) {
+              recordSyncTimestamp('rules', json.rules.updatedAt);
+              setRules(json.rules.items);
+            }
+            if (json.schedule && Array.isArray(json.schedule.items) && shouldApplyRemoteUpdate('schedule', json.schedule.updatedAt)) {
+              recordSyncTimestamp('schedule', json.schedule.updatedAt);
+              setSchedule(json.schedule.items);
+            }
+            if (json.tracks && Array.isArray(json.tracks.items) && shouldApplyRemoteUpdate('tracks', json.tracks.updatedAt)) {
+              recordSyncTimestamp('tracks', json.tracks.updatedAt);
+              setTracks(json.tracks.items);
+            }
+            if (json.prizes && Array.isArray(json.prizes.items) && shouldApplyRemoteUpdate('prizes', json.prizes.updatedAt)) {
+              recordSyncTimestamp('prizes', json.prizes.updatedAt);
+              setPrizes(json.prizes.items);
+            }
+            if (json.faqs && Array.isArray(json.faqs.items) && shouldApplyRemoteUpdate('faqs', json.faqs.updatedAt)) {
+              recordSyncTimestamp('faqs', json.faqs.updatedAt);
+              setFaqs(json.faqs.items);
             }
           }
         } else {
@@ -522,7 +641,7 @@ export const HackathonProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     // Initial load
     syncWithCentralDatabase();
 
-    // Live polling every 2.5s for real-time status updates without manual refresh
+    // Live polling every 2.5s for real-time status & content updates without manual refresh
     const pollTimer = setInterval(syncWithCentralDatabase, 2500);
 
     // Multi-tab broadcast channel
@@ -542,9 +661,11 @@ export const HackathonProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   }, [currentTeamSession?.id]);
 
   const updateEventConfig = (newConfig: Partial<EventConfig>) => {
+    const nowIso = new Date().toISOString();
+    recordSyncTimestamp('config', nowIso);
     setEventConfig(prev => {
-      const merged = { ...prev, ...newConfig, updatedAt: new Date().toISOString() };
-      saveSiteConfigToFirestore(merged);
+      const merged = { ...prev, ...newConfig, updatedAt: nowIso };
+      saveSiteConfigToFirestore(merged, nowIso);
       fetch('/api/config', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -556,26 +677,37 @@ export const HackathonProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   };
 
   const updateTrack = (id: string, updated: Partial<DomainTrack>) => {
-    setTracks(prev => prev.map(t => (t.id === id ? { ...t, ...updated } : t)));
-    broadcastLiveSync('SYNC_TRACKS');
+    setTracks(prev => {
+      const next = prev.map(t => (t.id === id ? { ...t, ...updated } : t));
+      persistContentSection('tracks', next);
+      return next;
+    });
   };
 
   const addTrack = (track: DomainTrack) => {
-    setTracks(prev => [...prev, track]);
-    broadcastLiveSync('SYNC_TRACKS');
+    setTracks(prev => {
+      const next = [...prev, track];
+      persistContentSection('tracks', next);
+      return next;
+    });
   };
 
   const deleteTrack = (id: string) => {
-    setTracks(prev => prev.filter(t => t.id !== id));
-    broadcastLiveSync('SYNC_TRACKS');
+    setTracks(prev => {
+      const next = prev.filter(t => t.id !== id);
+      persistContentSection('tracks', next);
+      return next;
+    });
   };
 
   const updatePrizes = (newPrizes: PrizeItem[]) => {
     setPrizes(newPrizes);
+    persistContentSection('prizes', newPrizes);
   };
 
   const updateSchedule = (newSchedule: ScheduleEvent[]) => {
     setSchedule(newSchedule);
+    persistContentSection('schedule', newSchedule);
   };
 
   const addScheduleEvent = (event: Omit<ScheduleEvent, 'id'> | ScheduleEvent) => {
@@ -583,19 +715,32 @@ export const HackathonProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       ...event,
       id: 'id' in event && event.id ? event.id : `sch-${Date.now()}`,
     };
-    setSchedule(prev => [...prev, newEvent]);
+    setSchedule(prev => {
+      const next = [...prev, newEvent];
+      persistContentSection('schedule', next);
+      return next;
+    });
   };
 
   const updateScheduleEvent = (id: string, updated: Partial<ScheduleEvent>) => {
-    setSchedule(prev => prev.map(s => (s.id === id ? { ...s, ...updated } : s)));
+    setSchedule(prev => {
+      const next = prev.map(s => (s.id === id ? { ...s, ...updated } : s));
+      persistContentSection('schedule', next);
+      return next;
+    });
   };
 
   const deleteScheduleEvent = (id: string) => {
-    setSchedule(prev => prev.filter(s => s.id !== id));
+    setSchedule(prev => {
+      const next = prev.filter(s => s.id !== id);
+      persistContentSection('schedule', next);
+      return next;
+    });
   };
 
   const resetScheduleToDefault = () => {
     setSchedule(initialSchedule);
+    persistContentSection('schedule', initialSchedule);
   };
 
   const addAnnouncement = (item: Omit<Announcement, 'id' | 'date'>) => {
@@ -682,12 +827,21 @@ export const HackathonProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       const copy = [...prev];
       const [removed] = copy.splice(sourceIndex, 1);
       copy.splice(destIndex, 0, removed);
-      return copy.map((m, idx) => ({ ...m, order: idx + 1 }));
+      const reordered = copy.map((m, idx) => ({ ...m, order: idx + 1 }));
+      Promise.all(reordered.map(m => saveCoreMemberToFirestore(m))).catch(() => {});
+      fetch('/api/core-team/sync', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ items: reordered }),
+      }).catch(() => {});
+      broadcastLiveSync('SYNC_CORE_TEAM');
+      return reordered;
     });
   };
 
   const updateRules = (newRules: RuleItem[]) => {
     setRules(newRules);
+    persistContentSection('rules', newRules);
   };
 
   const addRule = (rule: Omit<RuleItem, 'id'>) => {
@@ -695,23 +849,37 @@ export const HackathonProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       ...rule,
       id: `r-${Date.now()}`,
     };
-    setRules(prev => [...prev, newRule]);
+    setRules(prev => {
+      const next = [...prev, newRule];
+      persistContentSection('rules', next);
+      return next;
+    });
   };
 
   const updateRule = (id: string, updated: Partial<RuleItem>) => {
-    setRules(prev => prev.map(r => (r.id === id ? { ...r, ...updated } : r)));
+    setRules(prev => {
+      const next = prev.map(r => (r.id === id ? { ...r, ...updated } : r));
+      persistContentSection('rules', next);
+      return next;
+    });
   };
 
   const deleteRule = (id: string) => {
-    setRules(prev => prev.filter(r => r.id !== id));
+    setRules(prev => {
+      const next = prev.filter(r => r.id !== id);
+      persistContentSection('rules', next);
+      return next;
+    });
   };
 
   const resetRulesToDefault = () => {
     setRules(initialRules);
+    persistContentSection('rules', initialRules);
   };
 
   const updateFAQs = (newFaqs: FAQItem[]) => {
     setFaqs(newFaqs);
+    persistContentSection('faqs', newFaqs);
   };
 
   const registerTeam = (teamData: Omit<RegisteredTeam, 'id' | 'registeredAt' | 'checkedIn'>) => {
@@ -1343,16 +1511,44 @@ export const HackathonProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   const resetAllData = () => {
     if (window.confirm('Reset all hackathon data, teams, and content back to factory defaults?')) {
       localStorage.clear();
-      setEventConfig(initialEventConfig);
+      const nowIso = new Date().toISOString();
+      const resetConfig = { ...initialEventConfig, updatedAt: nowIso };
+      recordSyncTimestamp('config', nowIso);
+      setEventConfig(resetConfig);
+      saveSiteConfigToFirestore(resetConfig, nowIso);
+      fetch('/api/config', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(resetConfig),
+      }).catch(() => {});
+
       setTracks(initialTracks);
+      persistContentSection('tracks', initialTracks);
+
       setPrizes(initialPrizes);
+      persistContentSection('prizes', initialPrizes);
+
       setSchedule(initialSchedule);
+      persistContentSection('schedule', initialSchedule);
+
+      setRules(initialRules);
+      persistContentSection('rules', initialRules);
+
+      setFaqs(initialFAQs);
+      persistContentSection('faqs', initialFAQs);
+
       setAnnouncements(initialAnnouncements);
       setCoreTeam(initialCoreTeam);
-      setRules(initialRules);
-      setFaqs(initialFAQs);
+      Promise.all(initialCoreTeam.map(m => saveCoreMemberToFirestore(m))).catch(() => {});
+      fetch('/api/core-team/sync', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ items: initialCoreTeam }),
+      }).catch(() => {});
+
       setRegisteredTeams(initialRegisteredTeams);
       setCurrentTeamSession(null);
+      broadcastLiveSync('SYNC_ALL');
     }
   };
 

@@ -83,6 +83,27 @@
         "photoUrl": { "type": "string" }
       },
       "required": ["id", "name", "role", "category"]
+    },
+    "SiteContent": {
+      "title": "Dynamic Site Content Section",
+      "description": "Structured real-time synced lists for event rules, schedule timeline, domain tracks, prizes, and FAQs across all devices.",
+      "type": "object",
+      "properties": {
+        "section": {
+          "type": "string",
+          "enum": ["rules", "schedule", "tracks", "prizes", "faqs"],
+          "description": "Content section identifier"
+        },
+        "items": {
+          "type": "array",
+          "description": "Serialized array of structured section items"
+        },
+        "updatedAt": {
+          "type": "string",
+          "description": "ISO timestamp of last admin update"
+        }
+      },
+      "required": ["section", "items", "updatedAt"]
     }
   },
   "firestore": {
@@ -101,6 +122,10 @@
     "/core_team/{memberId}": {
       "schema": "CoreTeamMember",
       "description": "Live committee list, photos, and roles"
+    },
+    "/site_content/{sectionId}": {
+      "schema": "SiteContent",
+      "description": "Real-time cross-device synchronized rules, schedule, tracks, prizes, and FAQs"
     }
   }
 }

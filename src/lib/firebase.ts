@@ -33,22 +33,75 @@ export enum OperationType {
   WRITE = 'write',
 }
 
-export interface FirestoreErrorContext {
-  operation: OperationType;
-  path: string;
-  [key: string]: any;
+export interface FirestoreErrorInfo {
+  error: string;
+  operationType: OperationType;
+  path: string | null;
+  authInfo: {
+    userId?: string | null;
+    email?: string | null;
+    emailVerified?: boolean | null;
+    isAnonymous?: boolean | null;
+    tenantId?: string | null;
+    providerInfo?: {
+      providerId?: string | null;
+      email?: string | null;
+    }[];
+  };
 }
 
 export class FirestorePermissionError extends Error {
-  constructor(public context: FirestoreErrorContext, originalError?: any) {
-    super(`Firestore permission error on ${context.operation} at ${context.path}: ${originalError?.message || 'Access denied'}`);
+  constructor(public info: FirestoreErrorInfo) {
+    super(JSON.stringify(info));
     this.name = 'FirestorePermissionError';
   }
 }
 
-export function handleFirestoreError(error: unknown, context: FirestoreErrorContext): never {
-  console.error('[Firestore Error]', context, error);
-  throw new FirestorePermissionError(context, error);
+function buildFirestoreErrorInfo(
+  error: unknown,
+  operationType: OperationType,
+  path: string | null
+): FirestoreErrorInfo {
+  return {
+    error: error instanceof Error ? error.message : String(error),
+    authInfo: {
+      userId: auth.currentUser?.uid,
+      email: auth.currentUser?.email,
+      emailVerified: auth.currentUser?.emailVerified,
+      isAnonymous: auth.currentUser?.isAnonymous,
+      tenantId: auth.currentUser?.tenantId,
+      providerInfo:
+        auth.currentUser?.providerData?.map((provider) => ({
+          providerId: provider.providerId,
+          email: provider.email,
+        })) || [],
+    },
+    operationType,
+    path,
+  };
+}
+
+export function handleFirestoreError(
+  error: unknown,
+  operationType: OperationType,
+  path: string | null
+): never {
+  const errInfo = buildFirestoreErrorInfo(error, operationType, path);
+  console.error('Firestore Error: ', JSON.stringify(errInfo));
+  throw new Error(JSON.stringify(errInfo));
+}
+
+function logFirestoreWarning(
+  error: unknown,
+  operationType: OperationType,
+  path: string | null
+) {
+  const errInfo = buildFirestoreErrorInfo(error, operationType, path);
+  console.warn('Firestore Sync Warning: ', JSON.stringify(errInfo));
+}
+
+function stripUndefined<T>(obj: T): T {
+  return JSON.parse(JSON.stringify(obj)) as T;
 }
 
 // Initialize Firebase App instance
@@ -329,26 +382,24 @@ export function subscribeFirestoreTeams(
 // FIRESTORE LIVE REAL-TIME SYNC FOR SITE CONFIG & LINKS
 // -----------------------------------------------------------------------------
 
-export async function saveSiteConfigToFirestore(config: Partial<EventConfig>): Promise<void> {
+export async function saveSiteConfigToFirestore(config: Partial<EventConfig>, updatedAt?: string): Promise<void> {
   const path = 'site_config/event_config';
   try {
     const configRef = doc(db, 'site_config', 'event_config');
-    await setDoc(
-      configRef,
-      {
-        ...config,
-        updatedAt: new Date().toISOString(),
-      },
-      { merge: true }
-    );
+    const cleanConfig = stripUndefined({
+      ...config,
+      updatedAt: updatedAt || config.updatedAt || new Date().toISOString(),
+    });
+    await setDoc(configRef, cleanConfig, { merge: true });
   } catch (error) {
-    console.warn('Firestore save site config warning:', error);
+    logFirestoreWarning(error, OperationType.WRITE, path);
   }
 }
 
 export function subscribeFirestoreSiteConfig(
   callback: (config: Partial<EventConfig>) => void
 ): Unsubscribe {
+  const path = 'site_config/event_config';
   const configRef = doc(db, 'site_config', 'event_config');
   return onSnapshot(
     configRef,
@@ -358,7 +409,7 @@ export function subscribeFirestoreSiteConfig(
       }
     },
     (err) => {
-      console.warn('Firestore site config snapshot warning:', err);
+      logFirestoreWarning(err, OperationType.GET, path);
     }
   );
 }
@@ -368,26 +419,29 @@ export function subscribeFirestoreSiteConfig(
 // -----------------------------------------------------------------------------
 
 export async function saveAnnouncementToFirestore(announcement: Announcement): Promise<void> {
+  const path = `announcements/${announcement.id}`;
   try {
     const docRef = doc(db, 'announcements', announcement.id);
-    await setDoc(docRef, announcement, { merge: true });
+    await setDoc(docRef, stripUndefined(announcement));
   } catch (error) {
-    console.warn('Firestore save announcement warning:', error);
+    logFirestoreWarning(error, OperationType.WRITE, path);
   }
 }
 
 export async function deleteAnnouncementFromFirestore(id: string): Promise<void> {
+  const path = `announcements/${id}`;
   try {
     const docRef = doc(db, 'announcements', id);
     await deleteDoc(docRef);
   } catch (error) {
-    console.warn('Firestore delete announcement warning:', error);
+    logFirestoreWarning(error, OperationType.DELETE, path);
   }
 }
 
 export function subscribeFirestoreAnnouncements(
-  callback: (announcements: Announcement[]) => void
+  callback: (announcements: Announcement[], fromServer: boolean) => void
 ): Unsubscribe {
+  const path = 'announcements';
   const colRef = collection(db, 'announcements');
   return onSnapshot(
     colRef,
@@ -413,10 +467,10 @@ export function subscribeFirestoreAnnouncements(
         if (!a.pinned && b.pinned) return 1;
         return new Date(b.date).getTime() - new Date(a.date).getTime();
       });
-      callback(items);
+      callback(items, !snapshot.metadata.fromCache);
     },
     (err) => {
-      console.warn('Firestore announcements snapshot warning:', err);
+      logFirestoreWarning(err, OperationType.LIST, path);
     }
   );
 }
@@ -426,26 +480,29 @@ export function subscribeFirestoreAnnouncements(
 // -----------------------------------------------------------------------------
 
 export async function saveCoreMemberToFirestore(member: CoreTeamMember): Promise<void> {
+  const path = `core_team/${member.id}`;
   try {
     const docRef = doc(db, 'core_team', member.id);
-    await setDoc(docRef, member, { merge: true });
+    await setDoc(docRef, stripUndefined(member));
   } catch (error) {
-    console.warn('Firestore save core member warning:', error);
+    logFirestoreWarning(error, OperationType.WRITE, path);
   }
 }
 
 export async function deleteCoreMemberFromFirestore(id: string): Promise<void> {
+  const path = `core_team/${id}`;
   try {
     const docRef = doc(db, 'core_team', id);
     await deleteDoc(docRef);
   } catch (error) {
-    console.warn('Firestore delete core member warning:', error);
+    logFirestoreWarning(error, OperationType.DELETE, path);
   }
 }
 
 export function subscribeFirestoreCoreTeam(
-  callback: (members: CoreTeamMember[]) => void
+  callback: (members: CoreTeamMember[], fromServer: boolean) => void
 ): Unsubscribe {
+  const path = 'core_team';
   const colRef = collection(db, 'core_team');
   return onSnapshot(
     colRef,
@@ -466,11 +523,69 @@ export function subscribeFirestoreCoreTeam(
         });
       });
       members.sort((a, b) => a.order - b.order);
-      callback(members);
+      callback(members, !snapshot.metadata.fromCache);
     },
     (err) => {
-      console.warn('Firestore core team snapshot warning:', err);
+      logFirestoreWarning(err, OperationType.LIST, path);
     }
   );
 }
+
+// -----------------------------------------------------------------------------
+// FIRESTORE UNIVERSAL CROSS-DEVICE SYNC FOR RULES, SCHEDULE, TRACKS, PRIZES, FAQS
+// -----------------------------------------------------------------------------
+
+export type SiteContentSection = 'rules' | 'schedule' | 'tracks' | 'prizes' | 'faqs';
+
+export interface SiteContentDoc<T = unknown> {
+  section: SiteContentSection;
+  items: T[];
+  updatedAt: string;
+}
+
+export async function saveSiteContentToFirestore<T>(
+  section: SiteContentSection,
+  items: T[],
+  updatedAt?: string
+): Promise<void> {
+  const path = `site_content/${section}`;
+  try {
+    const docRef = doc(db, 'site_content', section);
+    const payload: SiteContentDoc<T> = {
+      section,
+      items: stripUndefined(items),
+      updatedAt: updatedAt || new Date().toISOString(),
+    };
+    await setDoc(docRef, payload);
+  } catch (error) {
+    logFirestoreWarning(error, OperationType.WRITE, path);
+  }
+}
+
+export function subscribeFirestoreSiteContent<T>(
+  section: SiteContentSection,
+  callback: (payload: SiteContentDoc<T>) => void
+): Unsubscribe {
+  const path = `site_content/${section}`;
+  const docRef = doc(db, 'site_content', section);
+  return onSnapshot(
+    docRef,
+    (docSnap) => {
+      if (docSnap.exists()) {
+        const data = docSnap.data();
+        if (Array.isArray(data?.items) && typeof data?.updatedAt === 'string') {
+          callback({
+            section,
+            items: data.items as T[],
+            updatedAt: data.updatedAt,
+          });
+        }
+      }
+    },
+    (err) => {
+      logFirestoreWarning(err, OperationType.GET, path);
+    }
+  );
+}
+
 
