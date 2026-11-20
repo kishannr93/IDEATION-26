@@ -190,9 +190,13 @@ export const HackathonProvider: React.FC<{ children: React.ReactNode }> = ({ chi
             dates: '1 & 2 December 2026',
             dateStart: '2026-12-01T09:00:00+05:30',
             dateEnd: '2026-12-02T10:00:00+05:30',
+            whatsappGroupLink: parsed.whatsappGroupLink || initialEventConfig.whatsappGroupLink,
           };
         }
-        return parsed;
+        return {
+          ...parsed,
+          whatsappGroupLink: parsed.whatsappGroupLink || initialEventConfig.whatsappGroupLink,
+        };
       } catch {
         return initialEventConfig;
       }
@@ -509,7 +513,11 @@ export const HackathonProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       if (remoteConfig && Object.keys(remoteConfig).length > 0) {
         if (shouldApplyRemoteUpdate('config', remoteConfig.updatedAt)) {
           recordSyncTimestamp('config', remoteConfig.updatedAt);
-          setEventConfig((prev) => ({ ...prev, ...remoteConfig }));
+          setEventConfig((prev) => ({
+            ...prev,
+            ...remoteConfig,
+            whatsappGroupLink: remoteConfig.whatsappGroupLink || prev.whatsappGroupLink || initialEventConfig.whatsappGroupLink,
+          }));
         }
       }
     });
@@ -774,7 +782,11 @@ export const HackathonProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       if (snapshot.config && Object.keys(snapshot.config).length > 0) {
         if (shouldApplyRemoteUpdate('config', snapshot.config.updatedAt)) {
           recordSyncTimestamp('config', snapshot.config.updatedAt);
-          setEventConfig((prev) => ({ ...prev, ...snapshot.config }));
+          setEventConfig((prev) => ({
+            ...prev,
+            ...snapshot.config,
+            whatsappGroupLink: snapshot.config?.whatsappGroupLink || prev.whatsappGroupLink || initialEventConfig.whatsappGroupLink,
+          }));
         }
       }
       if (snapshot.sections.rules && shouldApplyRemoteUpdate('rules', snapshot.sections.rules.updatedAt)) {
@@ -846,7 +858,11 @@ export const HackathonProvider: React.FC<{ children: React.ReactNode }> = ({ chi
             if (json.config && typeof json.config === 'object' && Object.keys(json.config).length > 0) {
               if (shouldApplyRemoteUpdate('config', json.config.updatedAt)) {
                 recordSyncTimestamp('config', json.config.updatedAt);
-                setEventConfig(prev => ({ ...prev, ...json.config }));
+                setEventConfig(prev => ({
+                  ...prev,
+                  ...json.config,
+                  whatsappGroupLink: json.config?.whatsappGroupLink || prev.whatsappGroupLink || initialEventConfig.whatsappGroupLink,
+                }));
               }
             }
             if (json.announcementsSection && Array.isArray(json.announcementsSection.items) && shouldApplyRemoteUpdate('announcements', json.announcementsSection.updatedAt)) {

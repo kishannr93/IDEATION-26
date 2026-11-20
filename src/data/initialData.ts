@@ -21,6 +21,7 @@ export const initialEventConfig: EventConfig = {
   maxTeamsLimit: 120,
   upiId: (import.meta.env.VITE_UPI_ID as string) || 'anveshan.biet@upi',
   upiPayeeName: (import.meta.env.VITE_UPI_PAYEE_NAME as string) || 'Anveshan Club BIET',
+  whatsappGroupLink: 'https://chat.whatsapp.com/EHLiMxxfkOBLUCqnz8kolh',
 };
 
 export const initialTracks: DomainTrack[] = [

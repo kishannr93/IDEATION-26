@@ -85,6 +85,11 @@ export const Footer: React.FC<FooterProps> = ({ onOpenTerms, onOpenPrivacy }) =>
               </button>
             </li>
             <li>
+              <button onClick={() => navigateTo('home', 'whatsapp')} className="hover:text-emerald-400 transition-colors cursor-pointer">
+                WhatsApp Community
+              </button>
+            </li>
+            <li>
               <button onClick={() => navigateTo('home', 'location')} className="hover:text-[#35E0FF] transition-colors cursor-pointer">
                 Location & Venue Map
               </button>

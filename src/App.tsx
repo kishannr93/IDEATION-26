@@ -9,6 +9,7 @@ import { PrizesSection } from './components/PrizesSection';
 import { ScheduleSection } from './components/ScheduleSection';
 import { RulesSection } from './components/RulesSection';
 import { NewsSection } from './components/NewsSection';
+import { WhatsAppSection } from './components/WhatsAppSection';
 import { LocationSection } from './components/LocationSection';
 import { CoreTeamSection } from './components/CoreTeamSection';
 import { FAQSection } from './components/FAQSection';
@@ -90,6 +91,7 @@ const HackathonApp: React.FC = () => {
             <ScheduleSection />
             <RulesSection />
             <NewsSection />
+            <WhatsAppSection />
             <LocationSection />
             <CoreTeamSection />
             <FAQSection />
