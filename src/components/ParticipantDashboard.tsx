@@ -36,7 +36,22 @@ import {
   HelpCircle,
   AlertCircle,
   X,
+  Utensils,
+  Lock,
+  Unlock,
 } from 'lucide-react';
+import {
+  buildTeamMealQrPayload,
+  buildMemberMealQrPayload,
+  getTeamMealCode,
+  getMemberMealCode,
+  evaluateMealCooldown,
+  getTeamMealSlotProgress,
+  formatCooldownDuration,
+  MEAL_DAYS,
+  MEAL_TYPES,
+} from '../lib/mealPass';
+import { TeamQrCanvas } from './TeamQrModal';
 
 export const ParticipantDashboard: React.FC = () => {
   const {
@@ -84,7 +99,10 @@ export const ParticipantDashboard: React.FC = () => {
   const [formPptFile, setFormPptFile] = useState<{ name: string; dataUrl?: string } | null>(null);
 
   const qrCanvasRef = useRef<HTMLCanvasElement>(null);
+  const mealQrCanvasRef = useRef<HTMLCanvasElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const [mealNowTick, setMealNowTick] = useState<number>(() => Date.now());
+  const [showMemberMealQrs, setShowMemberMealQrs] = useState(false);
 
   // Sync edited idea if session changes
   useEffect(() => {
@@ -123,6 +141,22 @@ export const ParticipantDashboard: React.FC = () => {
         { width: 140, margin: 1, color: { dark: '#050B1A', light: '#FFFFFF' } }
       );
     }
+    if (currentTeamSession && mealQrCanvasRef.current) {
+      QRCode.toCanvas(
+        mealQrCanvasRef.current,
+        buildTeamMealQrPayload(currentTeamSession),
+        { width: 144, margin: 1, color: { dark: '#050B1A', light: '#FFFFFF' } }
+      );
+    }
+  }, [currentTeamSession]);
+
+  // 1-second live tick for participant's 3-hour meal cooldown indicator
+  useEffect(() => {
+    if (!currentTeamSession) return;
+    const interval = setInterval(() => {
+      setMealNowTick(Date.now());
+    }, 1000);
+    return () => clearInterval(interval);
   }, [currentTeamSession]);
 
   const handleLogin = (e: React.FormEvent) => {
@@ -1050,6 +1084,166 @@ export const ParticipantDashboard: React.FC = () => {
                 </div>
               </div>
             </div>
+
+            {/* Unique Per-Team Meals & Snacks QR Pass + 2-Day Tracker */}
+            {(() => {
+              const uniqueMealCode = getTeamMealCode(currentTeamSession);
+              const mealLogs = Array.isArray(currentTeamSession.mealLogs) ? currentTeamSession.mealLogs : [];
+              const cooldown = evaluateMealCooldown(mealLogs, mealNowTick, currentTeamSession);
+
+              return (
+                <div className="p-6 sm:p-7 rounded-2xl bg-[#081024] border border-[#FF8A2A]/35 shadow-xl space-y-6">
+                  <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 pb-5 border-b border-[#78AAFF]/20">
+                    <div className="flex items-center gap-3">
+                      <div className="w-11 h-11 rounded-xl bg-[#FF8A2A]/15 border border-[#FF8A2A]/40 text-[#FF8A2A] flex items-center justify-center shrink-0">
+                        <Utensils className="w-5 h-5" />
+                      </div>
+                      <div>
+                        <div className="text-[10px] font-mono text-[#FF8A2A] uppercase font-bold tracking-wider">
+                          Unique Team Food Pass · 2 Days (Dec 1 & Dec 2)
+                        </div>
+                        <h3 className="font-display font-bold text-lg text-white">
+                          Breakfast, Lunch, Snacks & Dinner QR Coupon
+                        </h3>
+                        <p className="text-xs text-[#9DB0D0]">
+                          Scan all {currentTeamSession.members.length} team members at the food counter to mark each meal section <strong className="text-emerald-300">SERVED</strong> (3-hour cooldown between meals).
+                        </p>
+                      </div>
+                    </div>
+
+                    {cooldown.blocked ? (
+                      <div className="px-3.5 py-2 rounded-xl bg-rose-500/15 border border-rose-400/40 text-xs flex items-center gap-2 shrink-0">
+                        <Lock className="w-4 h-4 text-rose-400 shrink-0" />
+                        <div>
+                          <div className="font-bold text-rose-300 font-mono">
+                            Cooldown: {formatCooldownDuration(cooldown.remainingMs)}
+                          </div>
+                          {cooldown.nextEligibleAt && (
+                            <div className="text-[10px] text-rose-200/80">
+                              Unlocks at{' '}
+                              {new Date(cooldown.nextEligibleAt).toLocaleTimeString([], {
+                                hour: '2-digit',
+                                minute: '2-digit',
+                              })}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="px-3.5 py-2 rounded-xl bg-emerald-500/15 border border-emerald-400/40 text-xs flex items-center gap-2 shrink-0 text-emerald-300 font-semibold">
+                        <Unlock className="w-4 h-4 shrink-0" />
+                        <span>Ready for Next Meal Scan</span>
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-center">
+                    {/* Unique Meal QR Box */}
+                    <div className="lg:col-span-4 flex flex-col items-center text-center p-4 rounded-2xl bg-[#0C1630] border border-[#FF8A2A]/25">
+                      <div className="p-3 bg-white rounded-2xl shadow-lg inline-block">
+                        <canvas ref={mealQrCanvasRef} className="w-36 h-36" />
+                      </div>
+                      <div className="font-mono text-xs font-bold text-[#FF8A2A] mt-3 px-2.5 py-1 rounded bg-[#081024] border border-[#FF8A2A]/30">
+                        {uniqueMealCode}
+                      </div>
+                      <div className="text-[11px] text-[#9DB0D0] mt-1.5">
+                        Unique Meal Pass for <strong className="text-white">{currentTeamSession.teamName}</strong>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setShowMemberMealQrs((prev) => !prev)}
+                        className="mt-3 px-3 py-1.5 rounded-lg text-[11px] font-semibold text-[#35E0FF] bg-[#132247] hover:bg-[#1a2d5c] border border-[#35E0FF]/30 transition-colors cursor-pointer"
+                      >
+                        {showMemberMealQrs
+                          ? 'Hide Member QR Codes'
+                          : `Show ${currentTeamSession.members.length} Member QRs`}
+                      </button>
+                    </div>
+
+                    {/* 2-Day × 4-Meal Matrix */}
+                    <div className="lg:col-span-8 grid grid-cols-1 sm:grid-cols-2 gap-4">
+                      {MEAL_DAYS.map((day) => {
+                        const servedCount = MEAL_TYPES.filter(
+                          (mt) => getTeamMealSlotProgress(currentTeamSession, day, mt).isServed
+                        ).length;
+                        return (
+                          <div
+                            key={day}
+                            className="p-4 rounded-2xl bg-[#0C1630] border border-[#78AAFF]/20 space-y-2.5"
+                          >
+                            <div className="text-xs font-bold text-white border-b border-[#78AAFF]/15 pb-2 flex items-center justify-between">
+                              <span>{day}</span>
+                              <span className="font-mono text-[10px] text-[#35E0FF]">
+                                {servedCount} / 4 Served
+                              </span>
+                            </div>
+                            <div className="space-y-2">
+                              {MEAL_TYPES.map((mType) => {
+                                const prog = getTeamMealSlotProgress(currentTeamSession, day, mType);
+                                return (
+                                  <div
+                                    key={mType}
+                                    className={`px-3 py-2 rounded-xl border text-xs flex items-center justify-between ${
+                                      prog.isServed
+                                        ? 'bg-emerald-500/15 border-emerald-400/50 text-emerald-200'
+                                        : prog.scannedCount > 0
+                                        ? 'bg-amber-500/10 border-amber-400/40 text-amber-200'
+                                        : 'bg-[#081024] border-[#78AAFF]/10 text-[#9DB0D0]'
+                                    }`}
+                                  >
+                                    <span className="font-semibold">{mType}</span>
+                                    {prog.isServed ? (
+                                      <span className="font-mono text-[10px] font-bold text-emerald-300 flex items-center gap-1">
+                                        <CheckCircle className="w-3.5 h-3.5" />
+                                        <span>SERVED ({prog.scannedCount}/{prog.totalMembers})</span>
+                                      </span>
+                                    ) : prog.scannedCount > 0 ? (
+                                      <span className="font-mono text-[10px] text-amber-300 font-semibold">
+                                        {prog.scannedCount}/{prog.totalMembers} Scanned
+                                      </span>
+                                    ) : (
+                                      <span className="font-mono text-[10px] opacity-60">Available</span>
+                                    )}
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  {/* Individual Member QR Passes */}
+                  {showMemberMealQrs && (
+                    <div className="pt-4 border-t border-[#78AAFF]/15 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+                      {currentTeamSession.members.map((member, idx) => (
+                        <div
+                          key={member.id}
+                          className="p-3 rounded-xl bg-[#0C1630] border border-[#78AAFF]/20 flex flex-col items-center text-center space-y-2"
+                        >
+                          <div className="p-2 bg-white rounded-xl">
+                            <TeamQrCanvas
+                              payload={buildMemberMealQrPayload(currentTeamSession, member, idx)}
+                              size={92}
+                            />
+                          </div>
+                          <div>
+                            <div className="font-bold text-white text-xs truncate max-w-[160px]">
+                              {member.name}
+                            </div>
+                            <div className="text-[10px] font-mono text-[#9DB0D0]">{member.usn}</div>
+                            <div className="text-[10px] font-mono text-[#FF8A2A] mt-0.5">
+                              {getMemberMealCode(currentTeamSession, idx)}
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              );
+            })()}
           </div>
         )}
       </div>

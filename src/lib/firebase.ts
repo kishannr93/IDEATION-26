@@ -22,7 +22,7 @@ import {
   Unsubscribe,
 } from 'firebase/firestore';
 import firebaseConfig from '../../firebase-applet-config.json';
-import { RegisteredTeam, ProjectSubmission, EventConfig, Announcement, CoreTeamMember } from '../types';
+import { RegisteredTeam, ProjectSubmission, EventConfig, Announcement, CoreTeamMember, MealScanRecord } from '../types';
 
 export enum OperationType {
   CREATE = 'create',
@@ -212,6 +212,8 @@ export async function saveTeamToFirestore(team: RegisteredTeam): Promise<void> {
       leaderPhone: leader?.phone || '',
       memberEmails: memberEmails.join(','),
       members: JSON.stringify(team.members),
+      mealCode: team.mealCode || '',
+      mealLogs: Array.isArray(team.mealLogs) ? JSON.stringify(team.mealLogs) : null,
       submission: team.submission ? JSON.stringify(team.submission) : null,
     };
 
@@ -268,6 +270,22 @@ export async function updateTeamSubmissionInFirestore(
   }
 }
 
+export async function updateTeamMealLogsInFirestore(
+  teamId: string,
+  mealCode: string,
+  mealLogs: MealScanRecord[]
+): Promise<void> {
+  try {
+    const teamRef = doc(db, 'teams', teamId);
+    await updateDoc(teamRef, {
+      mealCode,
+      mealLogs: JSON.stringify(mealLogs),
+    });
+  } catch (err) {
+    console.warn('Firestore meal logs update warning:', err);
+  }
+}
+
 export async function deleteTeamFromFirestore(teamId: string): Promise<void> {
   const path = `teams/${teamId}`;
   try {
@@ -302,6 +320,15 @@ export async function fetchAllTeamsFromFirestore(): Promise<RegisteredTeam[]> {
         parsedSubmission = undefined;
       }
 
+      let parsedMealLogs: MealScanRecord[] | undefined = undefined;
+      try {
+        if (data.mealLogs) {
+          parsedMealLogs = typeof data.mealLogs === 'string' ? JSON.parse(data.mealLogs) : data.mealLogs;
+        }
+      } catch {
+        parsedMealLogs = undefined;
+      }
+
       teams.push({
         id: data.id || docSnap.id,
         teamName: data.teamName,
@@ -320,6 +347,8 @@ export async function fetchAllTeamsFromFirestore(): Promise<RegisteredTeam[]> {
         checkedIn: Boolean(data.checkedIn),
         checkedInAt: data.checkedInAt,
         members: Array.isArray(parsedMembers) ? parsedMembers : [],
+        mealCode: typeof data.mealCode === 'string' && data.mealCode ? data.mealCode : undefined,
+        mealLogs: Array.isArray(parsedMealLogs) ? parsedMealLogs : undefined,
         submission: parsedSubmission,
       });
     });
@@ -358,6 +387,15 @@ export function subscribeFirestoreTeams(
           parsedSubmission = undefined;
         }
 
+        let parsedMealLogs: MealScanRecord[] | undefined = undefined;
+        try {
+          if (data.mealLogs) {
+            parsedMealLogs = typeof data.mealLogs === 'string' ? JSON.parse(data.mealLogs) : data.mealLogs;
+          }
+        } catch {
+          parsedMealLogs = undefined;
+        }
+
         teams.push({
           id: data.id || docSnap.id,
           teamName: data.teamName,
@@ -376,6 +414,8 @@ export function subscribeFirestoreTeams(
           checkedIn: Boolean(data.checkedIn),
           checkedInAt: data.checkedInAt,
           members: Array.isArray(parsedMembers) ? parsedMembers : [],
+          mealCode: typeof data.mealCode === 'string' && data.mealCode ? data.mealCode : undefined,
+          mealLogs: Array.isArray(parsedMealLogs) ? parsedMealLogs : undefined,
           submission: parsedSubmission,
         });
       });

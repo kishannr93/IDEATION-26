@@ -24,7 +24,9 @@
         "leaderEmail": { "type": "string", "format": "email", "description": "Unique email of the team leader" },
         "leaderPhone": { "type": "string", "description": "Mobile number of team leader" },
         "memberEmails": { "type": "string", "description": "Comma-separated or indexed list of member emails for uniqueness checks" },
-        "members": { "type": "string", "description": "JSON serialized team members list" }
+        "members": { "type": "string", "description": "JSON serialized team members list" },
+        "mealCode": { "type": "string", "description": "Unique per-team Meal & Snacks QR coupon code" },
+        "mealLogs": { "type": "string", "description": "JSON serialized array of 2-day meal/snack scan logs with 3-hour cooldown timestamps" }
       },
       "required": ["id", "teamName", "college", "primaryTrack", "paymentStatus", "registeredAt", "leaderEmail"]
     },

@@ -46,6 +46,22 @@ export interface SubmissionNotification {
   read: boolean;
 }
 
+export type MealDay = 'Day 1 (Dec 1)' | 'Day 2 (Dec 2)';
+
+export type MealType = 'Breakfast' | 'Lunch' | 'Snacks' | 'Dinner';
+
+export interface MealScanRecord {
+  id: string;
+  day: MealDay;
+  mealType: MealType;
+  scannedAt: string; // ISO timestamp
+  scannedBy?: string;
+  memberCount: number;
+  memberId?: string;
+  memberName?: string;
+  memberUsn?: string;
+}
+
 export interface RegisteredTeam {
   id: string; // e.g. IDN-0104
   teamName: string;
@@ -67,6 +83,8 @@ export interface RegisteredTeam {
   registeredAt: string;
   checkedIn: boolean;
   checkedInAt?: string;
+  mealCode?: string;
+  mealLogs?: MealScanRecord[];
   submission?: ProjectSubmission;
 }
 

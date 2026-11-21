@@ -3,6 +3,9 @@ import { useHackathon } from '../context/HackathonContext';
 import { RegisteredTeam, DomainTrack, Announcement, CoreTeamMember, CustomTeamSection, ScheduleEvent, RuleItem, ProjectSubmission, SubmissionNotification } from '../types';
 import { sendTransactionalEmail, generatePassEmailHtml } from '../lib/email';
 import { AdminQRScanner } from './AdminQRScanner';
+import { AdminMealScanner } from './AdminMealScanner';
+import { TeamQrModal, TeamUniqueQrSection, TeamQrCanvas } from './TeamQrModal';
+import { buildTeamRegistrationQrPayload, getTeamMealCode } from '../lib/mealPass';
 import { AdminRealtimeToasts, AdminRealtimeToast, playAdminNotificationTone } from './AdminRealtimeToasts';
 import { supabase, isSupabaseConfigured } from '../lib/supabase';
 import { generatePptTemplate } from '../lib/pptTemplate';
@@ -47,6 +50,7 @@ import {
   Check,
   Volume2,
   VolumeX,
+  Utensils,
 } from 'lucide-react';
 
 export const AdminPanel: React.FC = () => {
@@ -56,6 +60,8 @@ export const AdminPanel: React.FC = () => {
     registeredTeams,
     updatePaymentStatus,
     toggleCheckIn,
+    removeCheckInEntry,
+    recordTeamMealScan,
     tracks,
     updateTrack,
     addTrack,
@@ -167,7 +173,7 @@ export const AdminPanel: React.FC = () => {
   const [authError, setAuthError] = useState('');
 
   // Active Tab
-  const [activeTab, setActiveTab] = useState<'overview' | 'teams' | 'payments' | 'submissions' | 'news' | 'content' | 'coreteam' | 'checkin' | 'schedule' | 'rules'>('overview');
+  const [activeTab, setActiveTab] = useState<'overview' | 'teams' | 'payments' | 'submissions' | 'news' | 'content' | 'coreteam' | 'checkin' | 'meals' | 'schedule' | 'rules'>('overview');
 
   // Notifications Dropdown State
   const [showNotificationDropdown, setShowNotificationDropdown] = useState(false);
@@ -407,10 +413,12 @@ export const AdminPanel: React.FC = () => {
 
   // Table Filters & Search
   const [searchTerm, setSearchTerm] = useState('');
+  const [checkInSearch, setCheckInSearch] = useState('');
   const [filterTrack, setFilterTrack] = useState('All');
   const [filterPayment, setFilterPayment] = useState('All');
   const [filterCourse, setFilterCourse] = useState('All');
   const [selectedTeamModal, setSelectedTeamModal] = useState<RegisteredTeam | null>(null);
+  const [qrTeamModal, setQrTeamModal] = useState<RegisteredTeam | null>(null);
   const [teamToDelete, setTeamToDelete] = useState<RegisteredTeam | null>(null);
   const [isDeletingTeam, setIsDeletingTeam] = useState(false);
   const [deleteTeamError, setDeleteTeamError] = useState<string | null>(null);
@@ -639,6 +647,7 @@ export const AdminPanel: React.FC = () => {
     const team = registeredTeams.find(
       (t) =>
         t.id.toUpperCase() === query ||
+        getTeamMealCode(t).toUpperCase() === query ||
         t.teamName.toUpperCase() === query ||
         t.members.some((m) => m.email.toUpperCase() === query || m.usn.toUpperCase() === query)
     );
@@ -1280,6 +1289,18 @@ export const AdminPanel: React.FC = () => {
               </button>
 
               <button
+                onClick={() => setActiveTab('meals')}
+                className={`px-4 py-2 text-xs font-semibold rounded-xl whitespace-nowrap transition-colors flex items-center gap-1.5 ${
+                  activeTab === 'meals'
+                    ? 'bg-[#FF8A2A]/20 text-[#FF8A2A] border border-[#FF8A2A]/40'
+                    : 'text-[#9DB0D0] hover:text-white'
+                }`}
+              >
+                <Utensils className="w-4 h-4" />
+                <span>Meals & Snacks QR</span>
+              </button>
+
+              <button
                 onClick={() => setActiveTab('news')}
                 className={`px-4 py-2 text-xs font-semibold rounded-xl whitespace-nowrap transition-colors flex items-center gap-1.5 ${
                   activeTab === 'news'
@@ -1683,6 +1704,7 @@ export const AdminPanel: React.FC = () => {
                     <thead className="bg-[#081024] text-[#9DB0D0] uppercase font-mono text-[11px] border-b border-[#78AAFF]/15">
                       <tr>
                         <th className="py-3 px-4">Team ID</th>
+                        <th className="py-3 px-4">Unique Team QR</th>
                         <th className="py-3 px-4">Team Name & College</th>
                         <th className="py-3 px-4">Course</th>
                         <th className="py-3 px-4">Domain Track</th>
@@ -1695,14 +1717,38 @@ export const AdminPanel: React.FC = () => {
                     <tbody className="divide-y divide-[#78AAFF]/10 text-white">
                       {filteredTeams.length === 0 ? (
                         <tr>
-                          <td colSpan={8} className="py-8 text-center text-[#9DB0D0]">
+                          <td colSpan={9} className="py-8 text-center text-[#9DB0D0]">
                             No registered teams found matching filters.
                           </td>
                         </tr>
                       ) : (
-                        filteredTeams.map((team) => (
+                        filteredTeams.map((team) => {
+                          const uniqueCode = getTeamMealCode(team);
+                          return (
                           <tr key={team.id} className="hover:bg-[#132247]/50 transition-colors">
                             <td className="py-3 px-4 font-mono font-bold text-[#35E0FF]">{team.id}</td>
+                            <td className="py-3 px-4">
+                              <button
+                                type="button"
+                                onClick={() => setQrTeamModal(team)}
+                                className="inline-flex items-center gap-2 p-1.5 pr-2.5 rounded-xl bg-[#081024] hover:bg-[#132247] border border-[#35E0FF]/30 transition-colors cursor-pointer group"
+                                title={`Open Unique QR & Member QRs for ${team.teamName}`}
+                              >
+                                <span className="p-0.5 bg-white rounded-md shrink-0">
+                                  <TeamQrCanvas
+                                    payload={buildTeamRegistrationQrPayload(team)}
+                                    size={34}
+                                    className="w-8 h-8"
+                                  />
+                                </span>
+                                <span className="text-left">
+                                  <span className="block font-mono text-[10px] font-bold text-[#FF8A2A] group-hover:text-[#35E0FF]">
+                                    {uniqueCode}
+                                  </span>
+                                  <span className="block text-[9px] text-[#9DB0D0]">View Team QR</span>
+                                </span>
+                              </button>
+                            </td>
                             <td className="py-3 px-4">
                               <div className="font-bold text-white">{team.teamName}</div>
                               <div className="text-[11px] text-[#9DB0D0] truncate max-w-xs">{team.college}</div>
@@ -1739,6 +1785,15 @@ export const AdminPanel: React.FC = () => {
                               <div className="inline-flex items-center justify-end gap-1.5">
                                 <button
                                   type="button"
+                                  onClick={() => setQrTeamModal(team)}
+                                  className="px-2.5 py-1 text-xs text-[#FF8A2A] bg-[#FF8A2A]/10 hover:bg-[#FF8A2A]/20 border border-[#FF8A2A]/30 rounded-lg transition-colors flex items-center gap-1 cursor-pointer"
+                                  title="Show Unique Team QR & Member Meal QRs"
+                                >
+                                  <QrCode className="w-3.5 h-3.5" />
+                                  <span>QR</span>
+                                </button>
+                                <button
+                                  type="button"
                                   onClick={() => setSelectedTeamModal(team)}
                                   className="px-2.5 py-1 text-xs text-[#35E0FF] bg-[#132247] hover:bg-[#1a2d5c] rounded-lg transition-colors cursor-pointer"
                                 >
@@ -1758,7 +1813,8 @@ export const AdminPanel: React.FC = () => {
                               </div>
                             </td>
                           </tr>
-                        ))
+                          );
+                        })
                       )}
                     </tbody>
                   </table>
@@ -2255,7 +2311,140 @@ export const AdminPanel: React.FC = () => {
                   onVerifyAndCheckIn={handleVerifyAndCheckInTeam}
                   isStandaloneDeskMode={false}
                 />
+
+                {/* Event Day Checked-In Teams Log with Entry Delete */}
+                <div className="p-6 rounded-3xl bg-[#0C1630] border border-[#78AAFF]/20 space-y-4">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-4 border-b border-[#78AAFF]/20">
+                    <div>
+                      <h4 className="font-display font-bold text-lg text-white flex items-center gap-2">
+                        <CheckCircle className="w-5 h-5 text-emerald-400" />
+                        <span>Event Day Checked-In Teams ({totalCheckedIn})</span>
+                      </h4>
+                      <p className="text-xs text-[#9DB0D0] mt-0.5">
+                        Manage checked-in team entries from the desk. You can remove a check-in entry or delete the team record.
+                      </p>
+                    </div>
+
+                    <div className="relative w-full sm:w-72">
+                      <Search className="w-4 h-4 text-[#9DB0D0] absolute left-3 top-1/2 -translate-y-1/2" />
+                      <input
+                        type="text"
+                        value={checkInSearch}
+                        onChange={(e) => setCheckInSearch(e.target.value)}
+                        placeholder="Search checked-in team or ID..."
+                        className="w-full pl-9 pr-3 py-2 bg-[#081024] border border-[#78AAFF]/20 rounded-xl text-xs text-white focus:outline-none focus:border-[#35E0FF]"
+                      />
+                    </div>
+                  </div>
+
+                  {(() => {
+                    const checkedInList = registeredTeams.filter((t) => {
+                      if (!t.checkedIn) return false;
+                      if (!checkInSearch.trim()) return true;
+                      const q = checkInSearch.trim().toLowerCase();
+                      return (
+                        t.id.toLowerCase().includes(q) ||
+                        t.teamName.toLowerCase().includes(q) ||
+                        t.college.toLowerCase().includes(q) ||
+                        t.members.some((m) => m.name.toLowerCase().includes(q) || m.usn.toLowerCase().includes(q))
+                      );
+                    });
+
+                    if (checkedInList.length === 0) {
+                      return (
+                        <div className="py-8 text-center text-xs text-[#9DB0D0] bg-[#081024]/50 rounded-2xl border border-dashed border-[#78AAFF]/20">
+                          {totalCheckedIn === 0
+                            ? 'No teams have checked in for Event Day yet.'
+                            : 'No checked-in teams match your search query.'}
+                        </div>
+                      );
+                    }
+
+                    return (
+                      <div className="overflow-x-auto">
+                        <table className="w-full text-left border-collapse text-xs">
+                          <thead>
+                            <tr className="border-b border-[#78AAFF]/20 text-[10px] font-mono uppercase text-[#9DB0D0]">
+                              <th className="py-3 px-3">Team ID</th>
+                              <th className="py-3 px-3">Team Name &amp; College</th>
+                              <th className="py-3 px-3">Members</th>
+                              <th className="py-3 px-3">Checked-In Time</th>
+                              <th className="py-3 px-3 text-right">Event Day Actions</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-[#78AAFF]/10">
+                            {checkedInList.map((team) => (
+                              <tr key={team.id} className="hover:bg-[#081024]/60 transition-colors">
+                                <td className="py-3 px-3 font-mono font-bold text-[#35E0FF]">{team.id}</td>
+                                <td className="py-3 px-3">
+                                  <div className="font-bold text-white">{team.teamName}</div>
+                                  <div className="text-[11px] text-[#9DB0D0] truncate max-w-xs">
+                                    {team.college} · {team.primaryTrack}
+                                  </div>
+                                </td>
+                                <td className="py-3 px-3 font-mono text-white">
+                                  {team.members.length} members
+                                </td>
+                                <td className="py-3 px-3 font-mono text-emerald-300 text-[11px]">
+                                  {team.checkedInAt
+                                    ? new Date(team.checkedInAt).toLocaleString([], {
+                                        month: 'short',
+                                        day: 'numeric',
+                                        hour: '2-digit',
+                                        minute: '2-digit',
+                                      })
+                                    : 'Checked-In'}
+                                </td>
+                                <td className="py-3 px-3 text-right">
+                                  <div className="inline-flex items-center justify-end gap-2">
+                                    <button
+                                      type="button"
+                                      onClick={() =>
+                                        setConfirmDialog({
+                                          title: 'Delete Event Day Check-In Entry?',
+                                          message: `Remove the Event Day check-in entry for "${team.teamName}" (${team.id})? Their team registration remains active and they can check in again later.`,
+                                          confirmLabel: 'Remove Check-In Entry',
+                                          onConfirm: () => removeCheckInEntry(team.id),
+                                        })
+                                      }
+                                      className="px-3 py-1.5 rounded-xl text-[11px] font-semibold text-amber-300 hover:text-white bg-amber-500/15 hover:bg-amber-500/30 border border-amber-500/40 flex items-center gap-1.5 transition-colors cursor-pointer"
+                                      title="Remove this Event Day check-in entry"
+                                    >
+                                      <RotateCcw className="w-3.5 h-3.5" />
+                                      <span>Remove Check-In</span>
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        setDeleteTeamError(null);
+                                        setTeamToDelete(team);
+                                      }}
+                                      className="px-3 py-1.5 rounded-xl text-[11px] font-semibold text-rose-300 hover:text-white bg-rose-500/15 hover:bg-rose-500/35 border border-rose-500/40 flex items-center gap-1.5 transition-colors cursor-pointer"
+                                      title="Permanently delete team entry"
+                                    >
+                                      <Trash2 className="w-3.5 h-3.5" />
+                                      <span>Delete Entry</span>
+                                    </button>
+                                  </div>
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    );
+                  })()}
+                </div>
               </div>
+            )}
+
+            {/* TAB 4.5: TWO-DAY MEALS & SNACKS QR SCANNER (3-HOUR COOLDOWN PER TEAM) */}
+            {activeTab === 'meals' && (
+              <AdminMealScanner
+                registeredTeams={registeredTeams}
+                adminName={currentAdminUser?.name || currentAdminUser?.email}
+                onScanMeal={recordTeamMealScan}
+              />
             )}
 
             {/* TAB 5: NEWS & ANNOUNCEMENTS MANAGER */}
@@ -4115,6 +4304,8 @@ export const AdminPanel: React.FC = () => {
                   </div>
                 )}
 
+                <TeamUniqueQrSection team={selectedTeamModal} compact />
+
                 <div className="pt-4 border-t border-[#78AAFF]/20 flex flex-wrap items-center justify-between gap-3">
                   <span className="text-[11px] text-[#9DB0D0]">Official IDEATION 2026 Check-in Verification</span>
                   <div className="flex items-center gap-2">
@@ -4141,6 +4332,11 @@ export const AdminPanel: React.FC = () => {
               </div>
             </div>
           </div>
+        )}
+
+        {/* UNIQUE TEAM & MEMBER QR PASS MODAL FROM REGISTRATION TABLE */}
+        {qrTeamModal && (
+          <TeamQrModal team={qrTeamModal} onClose={() => setQrTeamModal(null)} />
         )}
 
         {/* EVALUATE PROJECT PRESENTATION MODAL */}

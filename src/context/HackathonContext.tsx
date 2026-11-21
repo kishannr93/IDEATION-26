@@ -12,6 +12,9 @@ import {
   RegisteredTeam,
   ProjectSubmission,
   SubmissionNotification,
+  MealDay,
+  MealType,
+  MealScanRecord,
 } from '../types';
 import {
   initialEventConfig,
@@ -33,6 +36,7 @@ import {
   updateTeamPaymentInFirestore,
   updateTeamCheckInInFirestore,
   updateTeamSubmissionInFirestore,
+  updateTeamMealLogsInFirestore,
   deleteTeamFromFirestore,
   subscribeFirestoreTeams,
   testFirestoreConnection,
@@ -57,7 +61,33 @@ import {
   getOrCreateSpreadsheet,
 } from '../lib/googleSheets';
 import { sendTransactionalEmail, generateSubmissionNotificationEmailHtml } from '../lib/email';
+import {
+  getTeamMealCode,
+  parseMealQrInput,
+  evaluateMealCooldown,
+  getTeamMealSlotProgress,
+  TeamMealSlotProgress,
+  formatCooldownDuration,
+  mergeMealLogs,
+} from '../lib/mealPass';
 import type { User } from 'firebase/auth';
+
+export interface MealScanResult {
+  success: boolean;
+  team?: RegisteredTeam;
+  scanRecord?: MealScanRecord;
+  scannedMemberName?: string;
+  scannedMemberUsn?: string;
+  slotProgress?: TeamMealSlotProgress;
+  allMembersServed?: boolean;
+  alreadyServed?: boolean;
+  alreadyMemberScanned?: boolean;
+  blockedByCooldown?: boolean;
+  remainingMs?: number;
+  nextEligibleAt?: string;
+  lastScan?: MealScanRecord;
+  message: string;
+}
 
 interface HackathonContextType {
   eventConfig: EventConfig;
@@ -111,6 +141,14 @@ interface HackathonContextType {
   deleteTeam: (id: string) => Promise<{ success: boolean; error?: string }>;
   updatePaymentStatus: (id: string, status: 'Pending' | 'Verified' | 'Rejected', remarks?: string) => void;
   toggleCheckIn: (id: string) => { success: boolean; checkedIn?: boolean; error?: string };
+  removeCheckInEntry: (id: string) => { success: boolean; error?: string };
+  recordTeamMealScan: (
+    qrOrTeamQuery: string,
+    day: MealDay,
+    mealType: MealType,
+    scannedBy?: string,
+    targetMemberId?: string
+  ) => MealScanResult;
   
   currentTeamSession: RegisteredTeam | null;
   setCurrentTeamSession: (team: RegisteredTeam | null) => void;
@@ -389,17 +427,29 @@ export const HackathonProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     const cleanIncoming = incomingTeams.filter((t) => t?.id && !deletedSet.has(t.id.toUpperCase()));
 
     setRegisteredTeams((prev) => {
+      const prevMap = new Map<string, RegisteredTeam>();
+      prev.forEach((t) => prevMap.set(t.id, t));
+
+      const mergeTeamRecord = (incoming: RegisteredTeam, existing?: RegisteredTeam): RegisteredTeam => {
+        const mergedLogs = mergeMealLogs(existing?.mealLogs, incoming.mealLogs);
+        return {
+          ...incoming,
+          mealCode: incoming.mealCode || existing?.mealCode || getTeamMealCode(incoming),
+          mealLogs: mergedLogs.length > 0 ? mergedLogs : undefined,
+        };
+      };
+
       let nextList: RegisteredTeam[];
       if (authoritative) {
         const map = new Map<string, RegisteredTeam>();
-        cleanIncoming.forEach((t) => map.set(t.id, t));
+        cleanIncoming.forEach((t) => map.set(t.id, mergeTeamRecord(t, prevMap.get(t.id))));
         // Preserve very recent (<15s) local registrations still propagating to cloud
         const now = Date.now();
         prev.forEach((t) => {
           if (!deletedSet.has(t.id.toUpperCase()) && !map.has(t.id)) {
             const ageMs = now - new Date(t.registeredAt).getTime();
             if (!Number.isNaN(ageMs) && ageMs >= 0 && ageMs < 15000) {
-              map.set(t.id, t);
+              map.set(t.id, mergeTeamRecord(t));
             }
           }
         });
@@ -407,9 +457,9 @@ export const HackathonProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       } else {
         const map = new Map<string, RegisteredTeam>();
         prev.forEach((t) => {
-          if (!deletedSet.has(t.id.toUpperCase())) map.set(t.id, t);
+          if (!deletedSet.has(t.id.toUpperCase())) map.set(t.id, mergeTeamRecord(t));
         });
-        cleanIncoming.forEach((t) => map.set(t.id, t));
+        cleanIncoming.forEach((t) => map.set(t.id, mergeTeamRecord(t, prevMap.get(t.id))));
         nextList = Array.from(map.values());
       }
       nextList.sort((a, b) => new Date(b.registeredAt).getTime() - new Date(a.registeredAt).getTime());
@@ -1363,6 +1413,8 @@ export const HackathonProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       id: teamId,
       registeredAt: new Date().toISOString(),
       checkedIn: false,
+      mealCode: getTeamMealCode({ id: teamId, teamName: teamData.teamName }),
+      mealLogs: [],
     };
 
     setRegisteredTeams(prev => [newTeam, ...prev]);
@@ -1544,6 +1596,8 @@ export const HackathonProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     // 2. Persist to central database
     fetch(`/api/teams/${encodeURIComponent(id)}/checkin`, {
       method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ checkedIn: newStatus }),
     }).catch(err => {
       console.warn('Central DB checkin update warning:', err);
     });
@@ -1556,6 +1610,224 @@ export const HackathonProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     } catch {}
 
     return { success: true, checkedIn: newStatus };
+  };
+
+  const removeCheckInEntry = (id: string): { success: boolean; error?: string } => {
+    const team = registeredTeams.find((t) => t.id === id);
+    if (!team) {
+      return { success: false, error: 'Team not found with ID ' + id };
+    }
+
+    setRegisteredTeams((prev) =>
+      prev.map((t) =>
+        t.id === id
+          ? {
+              ...t,
+              checkedIn: false,
+              checkedInAt: undefined,
+            }
+          : t
+      )
+    );
+
+    if (currentTeamSession?.id === id) {
+      setCurrentTeamSession((prev) =>
+        prev ? { ...prev, checkedIn: false, checkedInAt: undefined } : null
+      );
+    }
+
+    // 1. Clear in Firestore Cloud Database
+    updateTeamCheckInInFirestore(id, false, undefined);
+
+    // 2. Clear in Express Central Database
+    fetch(`/api/teams/${encodeURIComponent(id)}/checkin`, {
+      method: 'DELETE',
+    }).catch((err) => {
+      console.warn('Central DB remove checkin entry warning:', err);
+    });
+
+    // 3. Broadcast live update
+    broadcastLiveSync('SYNC_TEAMS');
+
+    return { success: true };
+  };
+
+  const recordTeamMealScan = (
+    qrOrTeamQuery: string,
+    day: MealDay,
+    mealType: MealType,
+    scannedBy?: string,
+    targetMemberId?: string
+  ): MealScanResult => {
+    const parsed = parseMealQrInput(qrOrTeamQuery);
+    const lookup = parsed.idOrCode.trim().toUpperCase();
+    if (!lookup) {
+      return {
+        success: false,
+        message: 'Empty QR code or Team ID. Please scan a valid Team QR Pass.',
+      };
+    }
+
+    const team = registeredTeams.find((t) => {
+      const teamMealCode = getTeamMealCode(t).toUpperCase();
+      return (
+        t.id.toUpperCase() === lookup ||
+        teamMealCode === lookup ||
+        (parsed.mealCode && teamMealCode === parsed.mealCode.toUpperCase()) ||
+        t.teamName.toUpperCase() === lookup ||
+        t.members.some((m) => m.email.toUpperCase() === lookup || m.usn.toUpperCase() === lookup)
+      );
+    });
+
+    if (!team) {
+      return {
+        success: false,
+        message: `No registered team found for "${qrOrTeamQuery.trim()}". Please check Team ID or Team QR.`,
+      };
+    }
+
+    const resolvedCode = getTeamMealCode(team);
+    const existingLogs = Array.isArray(team.mealLogs) ? team.mealLogs : [];
+    const currentProgress = getTeamMealSlotProgress(team, day, mealType);
+    const cooldown = evaluateMealCooldown(existingLogs, Date.now(), team, day, mealType);
+
+    // Case 1: All members in this team have ALREADY been scanned for this (day, mealType) -> SERVED
+    if (currentProgress.isServed) {
+      if (cooldown.blocked) {
+        const nextTimeStr = cooldown.nextEligibleAt
+          ? new Date(cooldown.nextEligibleAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+          : '3 hours';
+        return {
+          success: false,
+          team: { ...team, mealCode: resolvedCode },
+          slotProgress: currentProgress,
+          allMembersServed: true,
+          alreadyServed: true,
+          blockedByCooldown: true,
+          remainingMs: cooldown.remainingMs,
+          nextEligibleAt: cooldown.nextEligibleAt,
+          lastScan: cooldown.lastScan,
+          message: `SERVED (${currentProgress.scannedCount}/${currentProgress.totalMembers}) · 3-Hour Cooldown Active! Team ${team.teamName} already scanned all members for ${mealType} (${day}). Rescan unlocks in ${formatCooldownDuration(cooldown.remainingMs)} (at ${nextTimeStr}).`,
+        };
+      }
+      return {
+        success: false,
+        team: { ...team, mealCode: resolvedCode },
+        slotProgress: currentProgress,
+        allMembersServed: true,
+        alreadyServed: true,
+        message: `Team ${team.teamName} (${team.id}) already completed all ${currentProgress.totalMembers}/${currentProgress.totalMembers} members for ${mealType} (${day}) — Status: SERVED.`,
+      };
+    }
+
+    // Case 2: Team completed/scanned another meal session less than 3 hours ago
+    if (cooldown.blocked) {
+      const nextTimeStr = cooldown.nextEligibleAt
+        ? new Date(cooldown.nextEligibleAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+        : '3 hours';
+      return {
+        success: false,
+        team: { ...team, mealCode: resolvedCode },
+        slotProgress: currentProgress,
+        blockedByCooldown: true,
+        remainingMs: cooldown.remainingMs,
+        nextEligibleAt: cooldown.nextEligibleAt,
+        lastScan: cooldown.lastScan,
+        message: `3-Hour Cooldown Active! Team ${team.teamName} (${team.id}) claimed ${cooldown.lastScan?.mealType} (${cooldown.lastScan?.day}). Rescan allowed in ${formatCooldownDuration(cooldown.remainingMs)} (at ${nextTimeStr}).`,
+      };
+    }
+
+    // Case 3: Pick which member is scanning now (explicit memberId/QR or next unserved member)
+    const explicitMemberId = targetMemberId || parsed.memberId;
+    let targetMember = explicitMemberId
+      ? team.members.find((m) => m.id === explicitMemberId)
+      : typeof parsed.memberIndex === 'number' && team.members[parsed.memberIndex]
+      ? team.members[parsed.memberIndex]
+      : currentProgress.remainingMembers[0];
+
+    if (!targetMember && team.members.length > 0 && explicitMemberId) {
+      return {
+        success: false,
+        team: { ...team, mealCode: resolvedCode },
+        slotProgress: currentProgress,
+        message: `Member reference not found in team ${team.teamName}.`,
+      };
+    }
+
+    if (targetMember && currentProgress.scannedMembers.some((m) => m.id === targetMember!.id)) {
+      return {
+        success: false,
+        team: { ...team, mealCode: resolvedCode },
+        slotProgress: currentProgress,
+        alreadyMemberScanned: true,
+        scannedMemberName: targetMember.name,
+        scannedMemberUsn: targetMember.usn,
+        message: `${targetMember.name} (${targetMember.usn}) is already scanned for ${mealType} (${day}). Scan the remaining ${currentProgress.remainingMembers.length} member(s) of ${team.teamName} to mark SERVED.`,
+      };
+    }
+
+    const newRecord: MealScanRecord = {
+      id: `meal-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+      day,
+      mealType,
+      scannedAt: new Date().toISOString(),
+      scannedBy: scannedBy || 'Food Counter Desk',
+      memberCount: targetMember ? 1 : team.members.length,
+      memberId: targetMember?.id,
+      memberName: targetMember?.name,
+      memberUsn: targetMember?.usn,
+    };
+
+    const nextLogs = [...existingLogs, newRecord];
+    const updatedTeam: RegisteredTeam = {
+      ...team,
+      mealCode: resolvedCode,
+      mealLogs: nextLogs,
+    };
+
+    const nextProgress = getTeamMealSlotProgress(updatedTeam, day, mealType);
+
+    setRegisteredTeams((prev) => prev.map((t) => (t.id === team.id ? updatedTeam : t)));
+    if (currentTeamSession?.id === team.id) {
+      setCurrentTeamSession(updatedTeam);
+    }
+
+    // Persist to Firestore Cloud Database (cross-device live sync)
+    updateTeamMealLogsInFirestore(team.id, resolvedCode, nextLogs);
+
+    // Persist to Express Central Database
+    const memberIdx = targetMember
+      ? team.members.findIndex((m) => m.id === targetMember!.id)
+      : -1;
+    fetch(`/api/teams/${encodeURIComponent(team.id)}/meal-scan`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        day,
+        mealType,
+        mealCode: resolvedCode,
+        scannedBy: scannedBy || 'Food Counter Desk',
+        memberId: targetMember?.id,
+        memberIndex: memberIdx >= 0 ? memberIdx : undefined,
+      }),
+    }).catch((err) => {
+      console.warn('Central DB meal scan sync warning:', err);
+    });
+
+    broadcastLiveSync('SYNC_TEAMS');
+
+    return {
+      success: true,
+      team: updatedTeam,
+      scanRecord: newRecord,
+      scannedMemberName: targetMember?.name,
+      scannedMemberUsn: targetMember?.usn,
+      slotProgress: nextProgress,
+      allMembersServed: nextProgress.isServed,
+      message: nextProgress.isServed
+        ? `ALL ${nextProgress.totalMembers}/${nextProgress.totalMembers} MEMBERS SCANNED (${targetMember?.name || team.teamName}) — ${mealType} (${day}) MARKED AS SERVED! 3-hour cooldown starts now.`
+        : `Member ${nextProgress.scannedCount}/${nextProgress.totalMembers} Scanned: ${targetMember?.name} (${targetMember?.usn}). Scan ${nextProgress.remainingMembers.length} remaining member(s) to mark ${mealType} (${day}) as SERVED.`,
+    };
   };
 
   const markNotificationAsRead = (id: string) => {
@@ -2154,6 +2426,8 @@ export const HackathonProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         deleteTeam,
         updatePaymentStatus,
         toggleCheckIn,
+        removeCheckInEntry,
+        recordTeamMealScan,
         currentTeamSession,
         setCurrentTeamSession,
         selectedTrackForRegistration,

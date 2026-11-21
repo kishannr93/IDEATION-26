@@ -90,6 +90,18 @@ export interface TeamMemberRecord {
   isLeader?: boolean;
 }
 
+export interface MealScanRecordServer {
+  id: string;
+  day: 'Day 1 (Dec 1)' | 'Day 2 (Dec 2)';
+  mealType: 'Breakfast' | 'Lunch' | 'Snacks' | 'Dinner';
+  scannedAt: string;
+  scannedBy?: string;
+  memberCount: number;
+  memberId?: string;
+  memberName?: string;
+  memberUsn?: string;
+}
+
 export interface RegisteredTeamRecord {
   id: string;
   teamName: string;
@@ -109,7 +121,23 @@ export interface RegisteredTeamRecord {
   registeredAt: string;
   checkedIn: boolean;
   checkedInAt?: string;
+  mealCode?: string;
+  mealLogs?: MealScanRecordServer[];
   submission?: any;
+}
+
+const MEAL_COOLDOWN_MS_SERVER = 3 * 60 * 60 * 1000;
+
+function computeServerMealCode(teamId: string, teamName: string): string {
+  const cleanId = (teamId || 'IDN-0000').trim().toUpperCase();
+  const seed = `${cleanId}::${(teamName || '').trim().toUpperCase()}::IDEATION2026_MEAL`;
+  let hash = 2166136261;
+  for (let i = 0; i < seed.length; i++) {
+    hash ^= seed.charCodeAt(i);
+    hash = Math.imul(hash, 16777619);
+  }
+  const suffix = ((hash >>> 0) % 1679616).toString(36).toUpperCase().padStart(4, '0');
+  return `MEAL-${cleanId}-${suffix}`;
 }
 
 // Read database from central JSON file
@@ -453,6 +481,8 @@ app.post('/api/teams', (req: Request, res: Response) => {
     paymentRemarks: body.paymentRemarks || 'Registration submitted with transaction verification pending.',
     registeredAt: new Date().toISOString(),
     checkedIn: false,
+    mealCode: body.mealCode || computeServerMealCode(teamId, body.teamName.trim()),
+    mealLogs: [],
   };
 
   teams.unshift(newTeam);
@@ -524,7 +554,7 @@ app.patch('/api/teams/:id/payment', (req: Request, res: Response) => {
   });
 });
 
-// 5. TOGGLE CHECK-IN
+// 5. TOGGLE / SET CHECK-IN
 app.patch('/api/teams/:id/checkin', (req: Request, res: Response) => {
   const teamId = req.params.id.trim().toUpperCase();
   const teams = readDatabase();
@@ -533,12 +563,183 @@ app.patch('/api/teams/:id/checkin', (req: Request, res: Response) => {
     return res.status(404).json({ success: false, error: `Team ${teamId} not found` });
   }
 
-  const newStatus = !teams[idx].checkedIn;
+  const explicitStatus = typeof req.body?.checkedIn === 'boolean' ? req.body.checkedIn : undefined;
+  const newStatus = explicitStatus !== undefined ? explicitStatus : !teams[idx].checkedIn;
   teams[idx].checkedIn = newStatus;
-  teams[idx].checkedInAt = newStatus ? new Date().toISOString() : undefined;
+  teams[idx].checkedInAt = newStatus ? (teams[idx].checkedInAt || new Date().toISOString()) : undefined;
 
   writeDatabase(teams);
   return res.json({ success: true, data: teams[idx] });
+});
+
+// 5.01 DELETE EVENT DAY CHECK-IN ENTRY FOR A TEAM (RESET CHECK-IN STATUS)
+app.delete('/api/teams/:id/checkin', (req: Request, res: Response) => {
+  const teamId = req.params.id.trim().toUpperCase();
+  const teams = readDatabase();
+  const idx = teams.findIndex(t => t.id.toUpperCase() === teamId);
+  if (idx === -1) {
+    return res.status(404).json({ success: false, error: `Team ${teamId} not found` });
+  }
+
+  teams[idx].checkedIn = false;
+  teams[idx].checkedInAt = undefined;
+
+  writeDatabase(teams);
+  return res.json({
+    success: true,
+    data: teams[idx],
+    message: `Event Day check-in entry removed for team ${teamId}.`,
+  });
+});
+
+// 5.05 RECORD TEAM / MEMBER MEAL SCAN (MARKS SERVED WHEN ALL MEMBERS SCANNED + 3-HOUR COOLDOWN)
+app.post('/api/teams/:id/meal-scan', (req: Request, res: Response) => {
+  const rawQuery = req.params.id.trim().toUpperCase();
+  const { day, mealType, mealCode, scannedBy, memberId, memberIndex } = req.body as {
+    day?: 'Day 1 (Dec 1)' | 'Day 2 (Dec 2)';
+    mealType?: 'Breakfast' | 'Lunch' | 'Snacks' | 'Dinner';
+    mealCode?: string;
+    scannedBy?: string;
+    memberId?: string;
+    memberIndex?: number;
+  };
+
+  if (!day || !['Day 1 (Dec 1)', 'Day 2 (Dec 2)'].includes(day)) {
+    return res.status(400).json({ success: false, error: 'Valid event day (Day 1 (Dec 1) or Day 2 (Dec 2)) is required.' });
+  }
+  if (!mealType || !['Breakfast', 'Lunch', 'Snacks', 'Dinner'].includes(mealType)) {
+    return res.status(400).json({ success: false, error: 'Valid meal type (Breakfast, Lunch, Snacks, or Dinner) is required.' });
+  }
+
+  const teams = readDatabase();
+  const idx = teams.findIndex((t) => {
+    const code = t.mealCode || computeServerMealCode(t.id, t.teamName);
+    return (
+      t.id.toUpperCase() === rawQuery ||
+      code.toUpperCase() === rawQuery ||
+      (mealCode && code.toUpperCase() === mealCode.trim().toUpperCase())
+    );
+  });
+
+  if (idx === -1) {
+    return res.status(404).json({ success: false, error: `Team ${rawQuery} not found` });
+  }
+
+  const team = teams[idx];
+  const resolvedCode = team.mealCode || computeServerMealCode(team.id, team.teamName);
+  const existingLogs = Array.isArray(team.mealLogs) ? team.mealLogs : [];
+  const members = Array.isArray(team.members) ? team.members : [];
+  const slotLogs = existingLogs.filter((l) => l.day === day && l.mealType === mealType);
+
+  const hasLegacyAll = slotLogs.some((l) => !l.memberId);
+  const scannedIds = new Set<string>();
+  if (hasLegacyAll) {
+    members.forEach((m) => scannedIds.add(m.id));
+  } else {
+    slotLogs.forEach((l) => {
+      if (l.memberId) scannedIds.add(l.memberId);
+    });
+  }
+
+  const isAlreadyServed = members.length > 0 && scannedIds.size >= members.length;
+  const nowMs = Date.now();
+
+  const findLatest = (list: MealScanRecordServer[]) => {
+    let latest: MealScanRecordServer | undefined;
+    let maxMs = -1;
+    for (const l of list) {
+      const t = Date.parse(l.scannedAt);
+      if (!Number.isNaN(t) && t >= maxMs) {
+        maxMs = t;
+        latest = l;
+      }
+    }
+    return { latest, maxMs };
+  };
+
+  if (isAlreadyServed) {
+    const { latest, maxMs } = findLatest(slotLogs.length > 0 ? slotLogs : existingLogs);
+    if (latest && maxMs > 0 && nowMs - maxMs < MEAL_COOLDOWN_MS_SERVER) {
+      const remainingMs = Math.max(0, MEAL_COOLDOWN_MS_SERVER - (nowMs - maxMs));
+      const nextEligibleAt = new Date(maxMs + MEAL_COOLDOWN_MS_SERVER).toISOString();
+      return res.status(429).json({
+        success: false,
+        blockedByCooldown: true,
+        alreadyServed: true,
+        remainingMs,
+        nextEligibleAt,
+        lastScan: latest,
+        error: `All members already served for ${mealType} (${day}). 3-hour cooldown active.`,
+      });
+    }
+    return res.status(409).json({
+      success: false,
+      alreadyServed: true,
+      error: `${team.teamName} (${team.id}) already marked SERVED for ${mealType} (${day}).`,
+    });
+  }
+
+  // Check if any OTHER meal slot was scanned within the last 3 hours
+  const otherSlotLogs = existingLogs.filter((l) => !(l.day === day && l.mealType === mealType));
+  const { latest: latestOther, maxMs: otherMs } = findLatest(otherSlotLogs);
+  if (latestOther && otherMs > 0 && nowMs - otherMs < MEAL_COOLDOWN_MS_SERVER) {
+    const remainingMs = Math.max(0, MEAL_COOLDOWN_MS_SERVER - (nowMs - otherMs));
+    const nextEligibleAt = new Date(otherMs + MEAL_COOLDOWN_MS_SERVER).toISOString();
+    return res.status(429).json({
+      success: false,
+      blockedByCooldown: true,
+      remainingMs,
+      nextEligibleAt,
+      lastScan: latestOther,
+      error: `3-hour cooldown active for ${team.teamName}.`,
+    });
+  }
+
+  // Pick specific member or next unserved member
+  let targetMember = memberId
+    ? members.find((m) => m.id === memberId)
+    : typeof memberIndex === 'number' && members[memberIndex]
+    ? members[memberIndex]
+    : members.find((m) => !scannedIds.has(m.id));
+
+  if (targetMember && scannedIds.has(targetMember.id)) {
+    return res.status(409).json({
+      success: false,
+      alreadyMemberScanned: true,
+      error: `${targetMember.name} has already scanned for ${mealType} (${day}).`,
+    });
+  }
+
+  const scanRecord: MealScanRecordServer = {
+    id: `meal-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+    day,
+    mealType,
+    scannedAt: new Date(nowMs).toISOString(),
+    scannedBy: scannedBy || 'Admin Desk',
+    memberCount: targetMember ? 1 : members.length,
+    memberId: targetMember?.id,
+    memberName: targetMember?.name,
+    memberUsn: targetMember?.usn,
+  };
+
+  team.mealCode = resolvedCode;
+  team.mealLogs = [...existingLogs, scanRecord];
+  writeDatabase(teams);
+
+  const newScannedCount = targetMember ? scannedIds.size + 1 : members.length;
+  const allMembersServed = members.length === 0 || newScannedCount >= members.length;
+
+  return res.json({
+    success: true,
+    data: team,
+    scanRecord,
+    scannedCount: newScannedCount,
+    totalMembers: members.length,
+    allMembersServed,
+    message: allMembersServed
+      ? `ALL ${members.length}/${members.length} members scanned — ${mealType} (${day}) marked as SERVED!`
+      : `Member ${newScannedCount}/${members.length} (${targetMember?.name}) scanned for ${mealType} (${day}).`,
+  });
 });
 
 // 5.1 DELETE REGISTERED TEAM
