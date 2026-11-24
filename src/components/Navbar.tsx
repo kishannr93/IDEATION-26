@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { useHackathon } from '../context/HackathonContext';
-import { ShieldCheck, UserCheck, Menu, X, ArrowUpRight, Megaphone, QrCode, Download } from 'lucide-react';
+import { ShieldCheck, UserCheck, Menu, X, ArrowUpRight, Megaphone, QrCode, Download, Lock } from 'lucide-react';
 import bulbImg from '../assets/images/ideation_logo.jpg';
 import { generatePptTemplate } from '../lib/pptTemplate';
 
@@ -45,7 +45,7 @@ export const Navbar: React.FC<NavbarProps> = ({ onOpenQR }) => {
   const pinnedAnnouncements = announcements.filter(a => a.pinned);
   const marqueeText = pinnedAnnouncements.length > 0 
     ? pinnedAnnouncements.map(a => `${a.title} — ${a.content}`).join('   ✦   ')
-    : `${eventConfig.registrationOpen ? 'Registrations Open' : 'Portal Live'} for ${eventConfig.eventName} ✦ 24-Hour Hackathon at ${eventConfig.venue} ✦ ₹${eventConfig.prizePoolAmount.toLocaleString('en-IN')} Prize Pool ✦ ${eventConfig.dates}`;
+    : `${eventConfig.registrationOpen ? 'Registrations Open' : 'Registrations Closed'} for ${eventConfig.eventName} ✦ 24-Hour Hackathon at ${eventConfig.venue} ✦ ₹${eventConfig.prizePoolAmount.toLocaleString('en-IN')} Prize Pool ✦ ${eventConfig.dates}`;
 
   return (
     <header className="sticky top-0 z-40 w-full bg-[#050B1A]/90 backdrop-blur-md border-b border-[#35E0FF]/15">
@@ -190,13 +190,24 @@ export const Navbar: React.FC<NavbarProps> = ({ onOpenQR }) => {
             </button>
           )}
 
-          <button
-            onClick={() => setShowRegisterModal(true)}
-            className="relative group px-4 py-2 text-xs sm:text-sm font-bold text-white bg-gradient-to-r from-[#FF8A2A] to-[#F5611A] rounded-lg shadow-[0_0_18px_rgba(255,138,42,0.4)] hover:shadow-[0_0_24px_rgba(255,138,42,0.6)] hover:brightness-110 active:scale-95 transition-all whitespace-nowrap flex items-center gap-1.5 cursor-pointer"
-          >
-            <span>Register Now</span>
-            <span className="text-[10px] bg-black/30 px-1.5 py-0.5 rounded text-amber-200">₹{eventConfig.entryFee}</span>
-          </button>
+          {eventConfig.registrationOpen ? (
+            <button
+              onClick={() => setShowRegisterModal(true)}
+              className="relative group px-4 py-2 text-xs sm:text-sm font-bold text-white bg-gradient-to-r from-[#FF8A2A] to-[#F5611A] rounded-lg shadow-[0_0_18px_rgba(255,138,42,0.4)] hover:shadow-[0_0_24px_rgba(255,138,42,0.6)] hover:brightness-110 active:scale-95 transition-all whitespace-nowrap flex items-center gap-1.5 cursor-pointer"
+            >
+              <span>Register Now</span>
+              <span className="text-[10px] bg-black/30 px-1.5 py-0.5 rounded text-amber-200">₹{eventConfig.entryFee}</span>
+            </button>
+          ) : (
+            <button
+              type="button"
+              disabled
+              className="px-3.5 py-2 text-xs sm:text-sm font-bold text-rose-200 bg-rose-950/60 border border-rose-500/40 rounded-lg whitespace-nowrap flex items-center gap-1.5 cursor-not-allowed opacity-90"
+            >
+              <Lock className="w-3.5 h-3.5 text-rose-400" />
+              <span>Registrations Closed</span>
+            </button>
+          )}
 
           {/* Mobile hamburger */}
           <button

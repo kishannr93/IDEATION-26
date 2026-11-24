@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useHackathon } from '../context/HackathonContext';
 import { DomainTrack } from '../types';
-import { Sprout, Building2, Bot, HeartPulse, Cpu, Lightbulb, ArrowRight, X, Wrench, CheckCircle2, ExternalLink } from 'lucide-react';
+import { Sprout, Building2, Bot, HeartPulse, Cpu, Lightbulb, ArrowRight, X, Wrench, CheckCircle2, ExternalLink, Lock } from 'lucide-react';
 import gsap from 'gsap';
 import { ScrollTrigger } from 'gsap/ScrollTrigger';
 
@@ -267,16 +267,29 @@ export const TracksSection: React.FC = () => {
             {/* Modal Actions */}
             <div className="pt-5 border-t border-[#78AAFF]/20 flex flex-col sm:flex-row items-center justify-between gap-3">
               <span className="text-xs text-[#9DB0D0]">
-                Pre-fill this track directly in your team application
+                {eventConfig.registrationOpen
+                  ? 'Pre-fill this track directly in your team application'
+                  : 'Registrations are currently closed by the event organizers'}
               </span>
 
-              <button
-                onClick={() => handleSelectTrack(activeTrack.title)}
-                className="w-full sm:w-auto px-6 py-2.5 rounded-xl font-bold text-sm text-white bg-gradient-to-r from-[#FF8A2A] to-[#F5611A] shadow-[0_0_20px_rgba(255,138,42,0.4)] hover:brightness-110 active:scale-95 transition-all flex items-center justify-center gap-2"
-              >
-                <span>Choose This Track & Register</span>
-                <ArrowRight className="w-4 h-4" />
-              </button>
+              {eventConfig.registrationOpen ? (
+                <button
+                  onClick={() => handleSelectTrack(activeTrack.title)}
+                  className="w-full sm:w-auto px-6 py-2.5 rounded-xl font-bold text-sm text-white bg-gradient-to-r from-[#FF8A2A] to-[#F5611A] shadow-[0_0_20px_rgba(255,138,42,0.4)] hover:brightness-110 active:scale-95 transition-all flex items-center justify-center gap-2 cursor-pointer"
+                >
+                  <span>Choose This Track & Register</span>
+                  <ArrowRight className="w-4 h-4" />
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  disabled
+                  className="w-full sm:w-auto px-6 py-2.5 rounded-xl font-bold text-sm text-rose-200 bg-rose-950/60 border border-rose-500/40 cursor-not-allowed flex items-center justify-center gap-2 opacity-90"
+                >
+                  <Lock className="w-4 h-4 text-rose-400" />
+                  <span>Registrations Closed</span>
+                </button>
+              )}
             </div>
           </div>
         </div>

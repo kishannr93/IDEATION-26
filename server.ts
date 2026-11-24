@@ -371,6 +371,14 @@ app.get('/api/teams/:id', (req: Request, res: Response) => {
 
 // 3. REGISTER NEW TEAM
 app.post('/api/teams', (req: Request, res: Response) => {
+  const siteConfig = readJsonFile<Record<string, any> | null>(CONFIG_FILE, null);
+  if (siteConfig && siteConfig.registrationOpen === false) {
+    return res.status(403).json({
+      success: false,
+      error: 'Team registrations have been stopped by the event organizers.',
+    });
+  }
+
   const body = req.body as Partial<RegisteredTeamRecord>;
 
   if (!body.teamName || !body.teamName.trim()) {

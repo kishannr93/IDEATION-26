@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useHackathon } from '../context/HackathonContext';
-import { Calendar, MapPin, Users, Trophy, IndianRupee, ArrowRight, QrCode, Sparkles, Clock, CheckCircle, Download } from 'lucide-react';
+import { Calendar, MapPin, Users, Trophy, IndianRupee, ArrowRight, QrCode, Sparkles, Clock, CheckCircle, Download, Lock } from 'lucide-react';
 import heroBulbImg from '../assets/images/ideation_logo.jpg';
 import { generatePptTemplate } from '../lib/pptTemplate';
 
@@ -254,13 +254,24 @@ export const HeroSection: React.FC<HeroSectionProps> = ({ onOpenQR }) => {
 
           {/* Action Buttons */}
           <div className="flex flex-wrap items-center gap-4">
-            <button
-              onClick={() => setShowRegisterModal(true)}
-              className="px-7 py-3.5 rounded-xl font-bold text-base text-white bg-gradient-to-r from-[#FF8A2A] to-[#F5611A] shadow-[0_0_25px_rgba(255,138,42,0.5)] hover:shadow-[0_0_35px_rgba(255,138,42,0.7)] hover:scale-[1.02] active:scale-95 transition-all flex items-center gap-2 group"
-            >
-              <span>Register Team (₹{eventConfig.entryFee})</span>
-              <ArrowRight className="w-5 h-5 group-hover:translate-x-1 transition-transform" />
-            </button>
+            {eventConfig.registrationOpen ? (
+              <button
+                onClick={() => setShowRegisterModal(true)}
+                className="px-7 py-3.5 rounded-xl font-bold text-base text-white bg-gradient-to-r from-[#FF8A2A] to-[#F5611A] shadow-[0_0_25px_rgba(255,138,42,0.5)] hover:shadow-[0_0_35px_rgba(255,138,42,0.7)] hover:scale-[1.02] active:scale-95 transition-all flex items-center gap-2 group"
+              >
+                <span>Register Team (₹{eventConfig.entryFee})</span>
+                <ArrowRight className="w-5 h-5 group-hover:translate-x-1 transition-transform" />
+              </button>
+            ) : (
+              <button
+                type="button"
+                disabled
+                className="px-7 py-3.5 rounded-xl font-bold text-base text-rose-200 bg-rose-950/50 border border-rose-500/40 cursor-not-allowed flex items-center gap-2 opacity-90"
+              >
+                <Lock className="w-4 h-4 text-rose-400" />
+                <span>Registrations Closed</span>
+              </button>
+            )}
 
             <button
               onClick={() => navigateTo('home', 'tracks')}

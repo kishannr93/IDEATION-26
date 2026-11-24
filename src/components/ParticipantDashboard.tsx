@@ -342,7 +342,7 @@ export const ParticipantDashboard: React.FC = () => {
                 <LogOut className="w-3.5 h-3.5" />
                 <span>Log Out</span>
               </button>
-            ) : (
+            ) : eventConfig.registrationOpen ? (
               <button
                 onClick={() => setShowRegisterModal(true)}
                 className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold text-white bg-gradient-to-r from-[#FF8A2A] to-[#F5611A] shadow-[0_0_15px_rgba(255,138,42,0.3)] hover:brightness-110 transition-all cursor-pointer"
@@ -350,6 +350,11 @@ export const ParticipantDashboard: React.FC = () => {
                 <UserPlus className="w-3.5 h-3.5" />
                 <span>Register New Team</span>
               </button>
+            ) : (
+              <span className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold text-rose-300 bg-rose-500/10 border border-rose-500/30">
+                <Lock className="w-3.5 h-3.5 text-rose-400" />
+                <span>Registrations Closed</span>
+              </span>
             )}
           </div>
         </div>
@@ -374,16 +379,20 @@ export const ParticipantDashboard: React.FC = () => {
                     <span>Logged Out Successfully</span>
                   </div>
                   <p className="text-[11px] text-emerald-200/80 mt-0.5">
-                    Sign in with another team ID or register a new team now.
+                    {eventConfig.registrationOpen
+                      ? 'Sign in with another team ID or register a new team now.'
+                      : 'Sign in with another team ID below.'}
                   </p>
                 </div>
-                <button
-                  type="button"
-                  onClick={() => setShowRegisterModal(true)}
-                  className="px-3 py-1.5 rounded-xl text-xs font-bold text-white bg-gradient-to-r from-[#0052FF] to-[#35E0FF] hover:brightness-110 whitespace-nowrap shadow-md cursor-pointer"
-                >
-                  Register New
-                </button>
+                {eventConfig.registrationOpen && (
+                  <button
+                    type="button"
+                    onClick={() => setShowRegisterModal(true)}
+                    className="px-3 py-1.5 rounded-xl text-xs font-bold text-white bg-gradient-to-r from-[#0052FF] to-[#35E0FF] hover:brightness-110 whitespace-nowrap shadow-md cursor-pointer"
+                  >
+                    Register New
+                  </button>
+                )}
               </div>
             )}
 
@@ -470,17 +479,26 @@ export const ParticipantDashboard: React.FC = () => {
 
               {/* REGISTER NEW TEAM OPTION ON LOGOUT / LOGIN */}
               <div className="mt-6 pt-5 border-t border-[#78AAFF]/20 text-center">
-                <p className="text-xs text-[#9DB0D0] mb-2.5">
-                  Haven't registered your team yet, or want to register a new team?
-                </p>
-                <button
-                  type="button"
-                  onClick={() => setShowRegisterModal(true)}
-                  className="w-full py-2.5 rounded-xl font-bold text-xs text-white bg-gradient-to-r from-[#0052FF] to-[#35E0FF] shadow-[0_0_20px_rgba(53,224,255,0.25)] hover:brightness-110 active:scale-95 transition-all flex items-center justify-center gap-2 cursor-pointer"
-                >
-                  <UserPlus className="w-4 h-4" />
-                  <span>Register New Team (₹{eventConfig.entryFee})</span>
-                </button>
+                {eventConfig.registrationOpen ? (
+                  <>
+                    <p className="text-xs text-[#9DB0D0] mb-2.5">
+                      Haven't registered your team yet, or want to register a new team?
+                    </p>
+                    <button
+                      type="button"
+                      onClick={() => setShowRegisterModal(true)}
+                      className="w-full py-2.5 rounded-xl font-bold text-xs text-white bg-gradient-to-r from-[#0052FF] to-[#35E0FF] shadow-[0_0_20px_rgba(53,224,255,0.25)] hover:brightness-110 active:scale-95 transition-all flex items-center justify-center gap-2 cursor-pointer"
+                    >
+                      <UserPlus className="w-4 h-4" />
+                      <span>Register New Team (₹{eventConfig.entryFee})</span>
+                    </button>
+                  </>
+                ) : (
+                  <div className="p-3 rounded-xl bg-rose-500/10 border border-rose-500/30 text-xs text-rose-200 flex items-center justify-center gap-2">
+                    <Lock className="w-4 h-4 text-rose-400 shrink-0" />
+                    <span>New team registrations are currently closed by the organizers.</span>
+                  </div>
+                )}
               </div>
 
               <div className="mt-4 pt-3 border-t border-[#78AAFF]/10 text-xs text-[#9DB0D0] flex items-center justify-center gap-1.5 font-mono">

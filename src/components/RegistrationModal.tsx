@@ -23,6 +23,7 @@ import {
   Sparkles,
   QrCode,
   ShieldCheck,
+  Lock,
 } from 'lucide-react';
 
 interface RegistrationModalProps {
@@ -37,6 +38,7 @@ export const RegistrationModal: React.FC<RegistrationModalProps> = ({ isOpen, on
     registerTeam,
     selectedTrackForRegistration,
     setSelectedTrackForRegistration,
+    navigateTo,
   } = useHackathon();
 
   const [step, setStep] = useState(1);
@@ -499,6 +501,45 @@ export const RegistrationModal: React.FC<RegistrationModalProps> = ({ isOpen, on
                 className="px-6 py-2.5 rounded-xl font-bold text-xs text-white bg-gradient-to-r from-[#FF8A2A] to-[#F5611A] shadow-md hover:brightness-110 cursor-pointer"
               >
                 Go to Hackathon Portal
+              </button>
+            </div>
+          </div>
+        ) : !eventConfig.registrationOpen ? (
+          /* REGISTRATIONS STOPPED / CLOSED NOTICE */
+          <div className="text-center py-8 space-y-5">
+            <div className="w-16 h-16 rounded-full bg-rose-500/15 border-2 border-rose-500/50 text-rose-400 mx-auto flex items-center justify-center shadow-[0_0_25px_rgba(244,63,94,0.2)]">
+              <Lock className="w-8 h-8" />
+            </div>
+
+            <div className="space-y-2 max-w-md mx-auto">
+              <span className="inline-block px-3 py-1 rounded-full bg-rose-500/15 border border-rose-500/30 text-[11px] font-mono uppercase tracking-widest text-rose-300 font-bold">
+                Registration Portal Paused
+              </span>
+              <h2 className="text-2xl sm:text-3xl font-black font-display text-white">
+                Registrations Closed
+              </h2>
+              <p className="text-xs sm:text-sm text-[#9DB0D0] leading-relaxed">
+                Team registrations for <strong className="text-white">{eventConfig.eventName}</strong> have been stopped by the organizers. Already registered teams can still log in to view their pass and submit PPTs.
+              </p>
+            </div>
+
+            <div className="flex flex-wrap items-center justify-center gap-3 pt-2">
+              <button
+                type="button"
+                onClick={() => {
+                  handleModalClose();
+                  navigateTo('dashboard');
+                }}
+                className="px-5 py-2.5 rounded-xl font-bold text-xs text-white bg-gradient-to-r from-[#0052FF] to-[#35E0FF] shadow-md hover:brightness-110 cursor-pointer"
+              >
+                Already Registered? Team Login
+              </button>
+              <button
+                type="button"
+                onClick={handleModalClose}
+                className="px-5 py-2.5 rounded-xl font-semibold text-xs text-[#9DB0D0] hover:text-white bg-[#0C1630] border border-[#78AAFF]/25 cursor-pointer"
+              >
+                Close
               </button>
             </div>
           </div>

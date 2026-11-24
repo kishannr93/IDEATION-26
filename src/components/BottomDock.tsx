@@ -14,6 +14,7 @@ import {
   ChevronRight,
   MoreHorizontal,
   X,
+  Lock,
 } from 'lucide-react';
 
 export const BottomDock: React.FC = () => {
@@ -127,12 +128,18 @@ export const BottomDock: React.FC = () => {
 
             {/* Register */}
             <button
-              onClick={() => setShowRegisterModal(true)}
-              className="group relative p-2.5 rounded-xl text-white bg-gradient-to-r from-[#FF8A2A] to-[#F5611A] shadow-[0_0_14px_rgba(255,138,42,0.4)] hover:shadow-[0_0_20px_rgba(255,138,42,0.6)] hover:scale-105 active:scale-95 transition-all"
+              type="button"
+              disabled={!eventConfig.registrationOpen}
+              onClick={() => eventConfig.registrationOpen && setShowRegisterModal(true)}
+              className={`group relative p-2.5 rounded-xl transition-all ${
+                eventConfig.registrationOpen
+                  ? 'text-white bg-gradient-to-r from-[#FF8A2A] to-[#F5611A] shadow-[0_0_14px_rgba(255,138,42,0.4)] hover:shadow-[0_0_20px_rgba(255,138,42,0.6)] hover:scale-105 active:scale-95'
+                  : 'text-rose-300 bg-rose-950/60 border border-rose-500/40 cursor-not-allowed opacity-85'
+              }`}
             >
-              <UserPlus className="w-4 h-4" />
+              {eventConfig.registrationOpen ? <UserPlus className="w-4 h-4" /> : <Lock className="w-4 h-4" />}
               <span className="absolute -top-9 left-1/2 -translate-x-1/2 px-2 py-1 bg-[#0C1630] border border-[#FF8A2A]/40 rounded text-[11px] font-mono text-amber-200 opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none whitespace-nowrap shadow-lg">
-                Register (₹{eventConfig.entryFee})
+                {eventConfig.registrationOpen ? `Register (₹${eventConfig.entryFee})` : 'Registrations Closed'}
               </span>
             </button>
 
@@ -262,11 +269,17 @@ export const BottomDock: React.FC = () => {
         </button>
 
         <button
-          onClick={() => setShowRegisterModal(true)}
-          className="flex flex-col items-center gap-0.5 text-[10px] text-white -mt-4 bg-gradient-to-r from-[#FF8A2A] to-[#F5611A] p-2 rounded-full shadow-[0_0_16px_rgba(255,138,42,0.6)]"
+          type="button"
+          disabled={!eventConfig.registrationOpen}
+          onClick={() => eventConfig.registrationOpen && setShowRegisterModal(true)}
+          className={`flex flex-col items-center gap-0.5 text-[10px] -mt-4 p-2 rounded-full ${
+            eventConfig.registrationOpen
+              ? 'text-white bg-gradient-to-r from-[#FF8A2A] to-[#F5611A] shadow-[0_0_16px_rgba(255,138,42,0.6)]'
+              : 'text-rose-200 bg-rose-950/90 border border-rose-500/40 cursor-not-allowed'
+          }`}
         >
-          <UserPlus className="w-5 h-5" />
-          <span className="font-bold">Register</span>
+          {eventConfig.registrationOpen ? <UserPlus className="w-5 h-5" /> : <Lock className="w-5 h-5 text-rose-400" />}
+          <span className="font-bold">{eventConfig.registrationOpen ? 'Register' : 'Closed'}</span>
         </button>
 
         <button

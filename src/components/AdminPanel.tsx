@@ -51,6 +51,8 @@ import {
   Volume2,
   VolumeX,
   Utensils,
+  Lock,
+  Unlock,
 } from 'lucide-react';
 
 export const AdminPanel: React.FC = () => {
@@ -452,6 +454,32 @@ export const AdminPanel: React.FC = () => {
       });
     }
     setTimeout(() => setSyncAllFeedback(null), 5000);
+  };
+
+  const handleToggleRegistrationStatus = (nextOpen: boolean) => {
+    if (!nextOpen) {
+      setConfirmDialog({
+        title: 'Stop Team Registrations?',
+        message:
+          'Stopping registration will immediately disable all Register buttons across the portal, display "Registrations Closed", and block new team submissions until you reopen registration.',
+        confirmLabel: 'Stop Registration Now',
+        onConfirm: () => {
+          updateEventConfig({ registrationOpen: false });
+          setSyncAllFeedback({
+            text: 'Team registrations have been STOPPED across the portal.',
+            success: true,
+          });
+          setTimeout(() => setSyncAllFeedback(null), 5000);
+        },
+      });
+    } else {
+      updateEventConfig({ registrationOpen: true });
+      setSyncAllFeedback({
+        text: 'Team registrations are now OPEN and accepting new teams.',
+        success: true,
+      });
+      setTimeout(() => setSyncAllFeedback(null), 5000);
+    }
   };
 
   const handleConfirmDeleteTeam = async () => {
@@ -1364,6 +1392,75 @@ export const AdminPanel: React.FC = () => {
             {/* TAB 1: OVERVIEW */}
             {activeTab === 'overview' && (
               <div className="space-y-8">
+                {/* Registration Portal Control Banner */}
+                <div
+                  className={`p-5 rounded-2xl border flex flex-col sm:flex-row sm:items-center justify-between gap-4 ${
+                    eventConfig.registrationOpen
+                      ? 'bg-emerald-500/10 border-emerald-500/35'
+                      : 'bg-rose-500/10 border-rose-500/40'
+                  }`}
+                >
+                  <div className="flex items-start sm:items-center gap-3.5">
+                    <div
+                      className={`p-2.5 rounded-xl border shrink-0 ${
+                        eventConfig.registrationOpen
+                          ? 'bg-emerald-500/20 border-emerald-500/40 text-emerald-300'
+                          : 'bg-rose-500/20 border-rose-500/40 text-rose-300'
+                      }`}
+                    >
+                      {eventConfig.registrationOpen ? <Unlock className="w-5 h-5" /> : <Lock className="w-5 h-5" />}
+                    </div>
+                    <div>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <h3 className="text-sm font-bold font-display text-white">
+                          Team Registration Portal
+                        </h3>
+                        <span
+                          className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-mono font-bold border ${
+                            eventConfig.registrationOpen
+                              ? 'bg-emerald-500/20 border-emerald-500/40 text-emerald-300'
+                              : 'bg-rose-500/20 border-rose-500/40 text-rose-300'
+                          }`}
+                        >
+                          <span
+                            className={`w-2 h-2 rounded-full ${
+                              eventConfig.registrationOpen ? 'bg-emerald-400 animate-pulse' : 'bg-rose-400'
+                            }`}
+                          />
+                          <span>{eventConfig.registrationOpen ? 'OPEN · Accepting Teams' : 'STOPPED · Registrations Closed'}</span>
+                        </span>
+                      </div>
+                      <p className="text-xs text-[#9DB0D0] mt-1">
+                        {eventConfig.registrationOpen
+                          ? `Registrations are live (${totalTeams} / ${eventConfig.maxTeamsLimit} max teams). Click Stop Registration to close sign-ups immediately.`
+                          : 'New team registrations are currently stopped. Existing teams can still log in and upload PPTs.'}
+                      </p>
+                    </div>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() => handleToggleRegistrationStatus(!eventConfig.registrationOpen)}
+                    className={`px-4 py-2.5 rounded-xl text-xs font-bold text-white flex items-center justify-center gap-2 shrink-0 transition-all cursor-pointer shadow-md ${
+                      eventConfig.registrationOpen
+                        ? 'bg-gradient-to-r from-rose-600 to-rose-500 hover:brightness-110'
+                        : 'bg-gradient-to-r from-emerald-600 to-emerald-500 hover:brightness-110'
+                    }`}
+                  >
+                    {eventConfig.registrationOpen ? (
+                      <>
+                        <Lock className="w-4 h-4" />
+                        <span>Stop Registration</span>
+                      </>
+                    ) : (
+                      <>
+                        <Unlock className="w-4 h-4" />
+                        <span>Reopen Registration</span>
+                      </>
+                    )}
+                  </button>
+                </div>
+
                 {/* Metric Cards */}
                 <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
                   <div className="p-5 rounded-2xl bg-[#0C1630] border border-[#78AAFF]/20">
@@ -1694,6 +1791,28 @@ export const AdminPanel: React.FC = () => {
                     >
                       <Download className="w-3 h-3 text-[#35E0FF]" />
                       <span>CSV</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => handleToggleRegistrationStatus(!eventConfig.registrationOpen)}
+                      className={`px-3 py-1.5 rounded-lg text-xs font-bold text-white flex items-center gap-1.5 transition-all cursor-pointer ${
+                        eventConfig.registrationOpen
+                          ? 'bg-rose-600/90 hover:bg-rose-500'
+                          : 'bg-emerald-600/90 hover:bg-emerald-500'
+                      }`}
+                    >
+                      {eventConfig.registrationOpen ? (
+                        <>
+                          <Lock className="w-3 h-3" />
+                          <span>Stop Registration</span>
+                        </>
+                      ) : (
+                        <>
+                          <Unlock className="w-3 h-3" />
+                          <span>Reopen Registration</span>
+                        </>
+                      )}
                     </button>
                   </div>
                 </div>
@@ -2718,15 +2837,27 @@ export const AdminPanel: React.FC = () => {
 
                   <div className="pt-3 border-t border-[#78AAFF]/15 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                     <div className="flex flex-col sm:flex-row sm:items-center gap-4">
-                      <label className="flex items-center gap-2 cursor-pointer text-xs text-white">
-                        <input
-                          type="checkbox"
-                          checked={eventConfig.registrationOpen}
-                          onChange={(e) => updateEventConfig({ registrationOpen: e.target.checked })}
-                          className="rounded text-[#35E0FF]"
-                        />
-                        <span>Registrations Open</span>
-                      </label>
+                      <button
+                        type="button"
+                        onClick={() => handleToggleRegistrationStatus(!eventConfig.registrationOpen)}
+                        className={`px-3 py-1.5 rounded-xl text-xs font-bold border flex items-center gap-2 transition-all cursor-pointer ${
+                          eventConfig.registrationOpen
+                            ? 'bg-emerald-500/15 border-emerald-500/40 text-emerald-300 hover:bg-rose-500/15 hover:border-rose-500/40 hover:text-rose-200'
+                            : 'bg-rose-500/15 border-rose-500/40 text-rose-300 hover:bg-emerald-500/15 hover:border-emerald-500/40 hover:text-emerald-200'
+                        }`}
+                      >
+                        {eventConfig.registrationOpen ? (
+                          <>
+                            <Unlock className="w-3.5 h-3.5" />
+                            <span>Registrations: OPEN (Click to Stop)</span>
+                          </>
+                        ) : (
+                          <>
+                            <Lock className="w-3.5 h-3.5" />
+                            <span>Registrations: STOPPED (Click to Reopen)</span>
+                          </>
+                        )}
+                      </button>
 
                       <label className="flex items-center gap-2 cursor-pointer text-xs text-white">
                         <input

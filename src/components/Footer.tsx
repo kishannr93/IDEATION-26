@@ -1,6 +1,6 @@
 import React from 'react';
 import { useHackathon } from '../context/HackathonContext';
-import { MapPin, Mail, ShieldCheck, ExternalLink } from 'lucide-react';
+import { MapPin, Mail, ShieldCheck, ExternalLink, Lock } from 'lucide-react';
 import bulbImg from '../assets/images/ideation_logo.jpg';
 
 interface FooterProps {
@@ -109,11 +109,22 @@ export const Footer: React.FC<FooterProps> = ({ onOpenTerms, onOpenPrivacy }) =>
           </h4>
           <div className="space-y-2.5">
             <button
-              onClick={() => setShowRegisterModal(true)}
-              className="w-full text-left p-2.5 rounded-xl bg-[#0C1630] border border-[#78AAFF]/20 hover:border-[#FF8A2A] text-xs font-semibold text-white flex items-center justify-between transition-colors cursor-pointer"
+              type="button"
+              disabled={!eventConfig.registrationOpen}
+              onClick={() => eventConfig.registrationOpen && setShowRegisterModal(true)}
+              className={`w-full text-left p-2.5 rounded-xl bg-[#0C1630] border text-xs font-semibold flex items-center justify-between transition-colors ${
+                eventConfig.registrationOpen
+                  ? 'border-[#78AAFF]/20 hover:border-[#FF8A2A] text-white cursor-pointer'
+                  : 'border-rose-500/30 text-rose-200/80 cursor-not-allowed opacity-85'
+              }`}
             >
-              <span>Register Team (₹{eventConfig.entryFee})</span>
-              <span className="text-[10px] font-mono text-[#FF8A2A]">Open</span>
+              <span className="flex items-center gap-1.5">
+                {!eventConfig.registrationOpen && <Lock className="w-3.5 h-3.5 text-rose-400" />}
+                <span>{eventConfig.registrationOpen ? `Register Team (₹${eventConfig.entryFee})` : 'Registrations Closed'}</span>
+              </span>
+              <span className={`text-[10px] font-mono ${eventConfig.registrationOpen ? 'text-[#FF8A2A]' : 'text-rose-400'}`}>
+                {eventConfig.registrationOpen ? 'Open' : 'Closed'}
+              </span>
             </button>
 
             <button
