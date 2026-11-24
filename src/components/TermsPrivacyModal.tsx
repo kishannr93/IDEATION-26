@@ -1,5 +1,6 @@
 import React from 'react';
 import { X, ShieldCheck, FileText } from 'lucide-react';
+import { useHackathon } from '../context/HackathonContext';
 
 interface TermsPrivacyModalProps {
   type: 'terms' | 'privacy' | null;
@@ -7,6 +8,7 @@ interface TermsPrivacyModalProps {
 }
 
 export const TermsPrivacyModal: React.FC<TermsPrivacyModalProps> = ({ type, onClose }) => {
+  const { eventConfig } = useHackathon();
   if (!type) return null;
 
   return (
@@ -38,22 +40,22 @@ export const TermsPrivacyModal: React.FC<TermsPrivacyModalProps> = ({ type, onCl
             <>
               <h4 className="font-bold text-white text-sm">1. Event Participation & Eligibility</h4>
               <p>
-                IDEATION 2026 is organized by Anveshan Club at Bapuji Institute of Engineering and Technology (BIET), Davangere. Participation is strictly open to students currently pursuing B.E / B.Tech, M.Tech, and MCA. Valid physical institutional identity cards must be produced during reporting.
+                {eventConfig.eventName} is organized by {eventConfig.clubName} at {eventConfig.collegeName}. {eventConfig.eligibility || 'Participation is strictly open to students currently pursuing B.E / B.Tech, M.Tech, and MCA.'} Valid physical institutional identity cards must be produced during reporting.
               </p>
 
               <h4 className="font-bold text-white text-sm">2. Team Integrity & Code Originality</h4>
               <p>
-                Teams must consist of 3 or 4 members. All application development, hardware wiring, and algorithmic scripting must take place within the designated 24 hours (18-19 November 2026). Pre-built proprietary software or hardware submitted without modification will result in instant disqualification.
+                Teams must consist of {eventConfig.teamSize || '3 or 4 members'}. All application development, hardware wiring, and algorithmic scripting must take place within the designated 24 hours ({eventConfig.dates}). Pre-built proprietary software or hardware submitted without modification will result in instant disqualification.
               </p>
 
               <h4 className="font-bold text-white text-sm">3. Intellectual Property</h4>
               <p>
-                All intellectual property, source code, and design prototypes developed during IDEATION 2026 belong solely to the participating teams. BIET and Anveshan Club claim no ownership over student inventions.
+                All intellectual property, source code, and design prototypes developed during {eventConfig.eventName} belong solely to the participating teams. {eventConfig.collegeName} and {eventConfig.clubName} claim no ownership over student inventions.
               </p>
 
               <h4 className="font-bold text-white text-sm">4. Registration Fee & Cancellation</h4>
               <p>
-                The registration fee of ₹100 per team covers event badges, meals, snacks, lab access, and participation certificates. Registration fees are non-refundable once desk kits have been assigned.
+                The registration fee of ₹{eventConfig.entryFee} per team covers event badges, meals, snacks, lab access, and participation certificates. Registration fees are non-refundable once desk kits have been assigned.
               </p>
             </>
           ) : (
@@ -70,7 +72,7 @@ export const TermsPrivacyModal: React.FC<TermsPrivacyModalProps> = ({ type, onCl
 
               <h4 className="font-bold text-white text-sm">3. Media & Photography Consent</h4>
               <p>
-                By participating in IDEATION 2026, attendees grant Anveshan Club and BIET permission to capture photographs and video recordings of prototype presentations and the awards ceremony for non-commercial educational archives and promotional reporting.
+                By participating in {eventConfig.eventName}, attendees grant {eventConfig.clubName} and {eventConfig.collegeName} permission to capture photographs and video recordings of prototype presentations and the awards ceremony for non-commercial educational archives and promotional reporting.
               </p>
             </>
           )}

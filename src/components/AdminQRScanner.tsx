@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import jsQR from 'jsqr';
 import QRCode from 'qrcode';
 import { RegisteredTeam } from '../types';
+import { useHackathon } from '../context/HackathonContext';
 import {
   Camera,
   CameraOff,
@@ -35,6 +36,7 @@ export const AdminQRScanner: React.FC<AdminQRScannerProps> = ({
   onClose,
   isStandaloneDeskMode = false,
 }) => {
+  const { eventConfig } = useHackathon();
   // Scanner state
   const [isCameraActive, setIsCameraActive] = useState(false);
   const [cameraFacing, setCameraFacing] = useState<'environment' | 'user'>('environment');
@@ -591,13 +593,13 @@ export const AdminQRScanner: React.FC<AdminQRScannerProps> = ({
                 </div>
                 <div>
                   <div className="text-[10px] font-mono tracking-widest text-[#35E0FF] uppercase font-bold">
-                    BIET Davangere · Anveshan Club
+                    {eventConfig.collegeName} · {eventConfig.clubName}
                   </div>
                   <h2 className="text-xl sm:text-2xl font-black font-display text-white">
-                    IDEATION 2026 · Official Entry Pass
+                    {eventConfig.eventName} · Official Entry Pass
                   </h2>
                   <p className="text-xs text-[#9DB0D0]">
-                    24-Hour State-Level Hackathon · 18–19 November 2026
+                    {eventConfig.tagline} · {eventConfig.dates}
                   </p>
                 </div>
               </div>
@@ -638,7 +640,7 @@ export const AdminQRScanner: React.FC<AdminQRScannerProps> = ({
                   </div>
                   <div className="p-3 rounded-xl bg-[#0C1630] border border-[#78AAFF]/15 col-span-2 sm:col-span-1">
                     <span className="text-[10px] text-[#9DB0D0] block">Reporting Schedule</span>
-                    <span className="font-mono text-white text-xs">18 Nov, 08:00 AM</span>
+                    <span className="font-mono text-white text-xs">{eventConfig.dates} · 08:00 AM</span>
                   </div>
                 </div>
               </div>

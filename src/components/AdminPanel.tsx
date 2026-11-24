@@ -85,7 +85,11 @@ export const AdminPanel: React.FC = () => {
     exportTeamsToSQL,
     resetAllData,
     syncAllToCloud,
+    refreshAllFromCloud,
     isSyncingAll,
+    isFetchingAll,
+    lastSyncedAt,
+    syncStatus,
     deleteTeam,
     setActiveView,
     navigateTo,
@@ -438,7 +442,7 @@ export const AdminPanel: React.FC = () => {
       const res = await syncAllToCloud();
       if (res.success) {
         setSyncAllFeedback({
-          text: `All rules, schedule, announcements, links, and ${registeredTeams.length} teams synced live across every URL and device.`,
+          text: `All rules, schedule, announcements, links, core team, and ${registeredTeams.length} teams pushed live across every URL and device.`,
           success: true,
         });
       } else {
@@ -450,6 +454,35 @@ export const AdminPanel: React.FC = () => {
     } catch {
       setSyncAllFeedback({
         text: 'Could not sync data to cloud right now. Please try again.',
+        success: false,
+      });
+    }
+    setTimeout(() => setSyncAllFeedback(null), 5000);
+  };
+
+  const handleFetchEverythingLive = async () => {
+    setSyncAllFeedback(null);
+    try {
+      const res = await refreshAllFromCloud();
+      if (res.success) {
+        const timeStr = new Date(res.syncedAt).toLocaleTimeString('en-IN', {
+          hour: '2-digit',
+          minute: '2-digit',
+          second: '2-digit',
+        });
+        setSyncAllFeedback({
+          text: `Fetched latest live website settings, tracks, rules, schedule, announcements, committee, and registrations (${timeStr}).`,
+          success: true,
+        });
+      } else {
+        setSyncAllFeedback({
+          text: 'Cloud fetch encountered an issue. Showing best available synced state.',
+          success: false,
+        });
+      }
+    } catch {
+      setSyncAllFeedback({
+        text: 'Could not reach cloud right now. Check internet connection and try again.',
         success: false,
       });
     }
@@ -1013,15 +1046,27 @@ export const AdminPanel: React.FC = () => {
                   )}
                 </button>
 
+                {/* Fetch Everything Live Button */}
+                <button
+                  type="button"
+                  onClick={handleFetchEverythingLive}
+                  disabled={isFetchingAll}
+                  className="flex items-center gap-1.5 px-3 py-2 text-xs font-semibold text-[#35E0FF] bg-[#35E0FF]/10 hover:bg-[#35E0FF]/20 border border-[#35E0FF]/35 rounded-xl transition-all cursor-pointer disabled:opacity-50"
+                  title="Fetch latest website data, settings, rules, schedule, and team registrations live across all devices"
+                >
+                  <RefreshCw className={`w-3.5 h-3.5 ${isFetchingAll ? 'animate-spin' : ''}`} />
+                  <span className="hidden xl:inline">{isFetchingAll ? 'Fetching...' : 'Fetch Live'}</span>
+                </button>
+
                 {/* Global Sync All Data & Links Button */}
                 <button
                   type="button"
                   onClick={handleSyncAllNow}
                   disabled={isSyncingAll}
                   className="flex items-center gap-1.5 px-3 py-2 text-xs font-semibold text-emerald-300 bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/40 rounded-xl transition-all cursor-pointer disabled:opacity-50"
-                  title="Force sync all rules, schedule, announcements, links, and registrations across all devices and URLs"
+                  title="Force push & sync all rules, schedule, announcements, links, and registrations across all devices and URLs"
                 >
-                  <RefreshCw className={`w-3.5 h-3.5 ${isSyncingAll ? 'animate-spin' : ''}`} />
+                  <UploadCloud className={`w-3.5 h-3.5 ${isSyncingAll ? 'animate-pulse' : ''}`} />
                   <span className="hidden lg:inline">{isSyncingAll ? 'Syncing All...' : 'Sync All Data & Links'}</span>
                 </button>
 
@@ -2870,15 +2915,30 @@ export const AdminPanel: React.FC = () => {
                       </label>
                     </div>
 
-                    <div className="flex items-center gap-3">
-                      <span className="text-[11px] font-mono text-emerald-400">Auto-syncing live</span>
+                    <div className="flex flex-wrap items-center gap-2.5">
+                      <span className="text-[11px] font-mono text-emerald-400">
+                        {syncStatus === 'offline'
+                          ? 'Offline mode'
+                          : lastSyncedAt
+                          ? `Synced ${new Date(lastSyncedAt).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}`
+                          : 'Auto-syncing live'}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={handleFetchEverythingLive}
+                        disabled={isFetchingAll}
+                        className="px-3 py-1.5 rounded-xl text-xs font-bold text-[#35E0FF] bg-[#35E0FF]/10 hover:bg-[#35E0FF]/20 border border-[#35E0FF]/40 flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+                      >
+                        <RefreshCw className={`w-3.5 h-3.5 ${isFetchingAll ? 'animate-spin' : ''}`} />
+                        <span>{isFetchingAll ? 'Fetching...' : 'Fetch Everything Live'}</span>
+                      </button>
                       <button
                         type="button"
                         onClick={handleSyncAllNow}
                         disabled={isSyncingAll}
                         className="px-3.5 py-1.5 rounded-xl text-xs font-bold text-white bg-gradient-to-r from-emerald-500 to-[#35E0FF] hover:brightness-110 flex items-center gap-1.5 cursor-pointer disabled:opacity-50 shadow-md"
                       >
-                        <RefreshCw className={`w-3.5 h-3.5 ${isSyncingAll ? 'animate-spin' : ''}`} />
+                        <UploadCloud className={`w-3.5 h-3.5 ${isSyncingAll ? 'animate-pulse' : ''}`} />
                         <span>{isSyncingAll ? 'Syncing Live...' : 'Push & Sync Everything Live Now'}</span>
                       </button>
                     </div>

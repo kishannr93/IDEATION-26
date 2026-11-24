@@ -26,7 +26,11 @@
         "memberEmails": { "type": "string", "description": "Comma-separated or indexed list of member emails for uniqueness checks" },
         "members": { "type": "string", "description": "JSON serialized team members list" },
         "mealCode": { "type": "string", "description": "Unique per-team Meal & Snacks QR coupon code" },
-        "mealLogs": { "type": "string", "description": "JSON serialized array of 2-day meal/snack scan logs with 3-hour cooldown timestamps" }
+        "mealLogs": { "type": "string", "description": "JSON serialized array of 2-day meal/snack scan logs with 3-hour cooldown timestamps" },
+        "track": { "type": "string", "description": "Optional alias for primary track" },
+        "problemStatement": { "type": "string", "description": "Optional detailed problem statement" },
+        "paymentScreenshotUrl": { "type": "string", "description": "Compressed screenshot URL or data URI" },
+        "updatedAt": { "type": "string", "description": "ISO timestamp of last team update" }
       },
       "required": ["id", "teamName", "college", "primaryTrack", "paymentStatus", "registeredAt", "leaderEmail"]
     },
@@ -93,7 +97,7 @@
       "properties": {
         "section": {
           "type": "string",
-          "enum": ["rules", "schedule", "tracks", "prizes", "faqs", "announcements", "core_team_index", "team_sections", "deleted_teams"],
+          "enum": ["rules", "schedule", "tracks", "prizes", "faqs", "announcements", "core_team_index", "team_sections", "deleted_teams", "submission_notifications"],
           "description": "Content section identifier"
         },
         "items": {

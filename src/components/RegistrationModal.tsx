@@ -481,7 +481,7 @@ export const RegistrationModal: React.FC<RegistrationModalProps> = ({ isOpen, on
               </div>
 
               <div className="pt-3 border-t border-[#78AAFF]/15 text-[11px] text-[#9DB0D0] flex items-center justify-between">
-                <span>Bring valid College ID Cards on 18 Nov, 08:00 AM</span>
+                <span>Bring valid College ID Cards ({eventConfig.dates}, 08:00 AM)</span>
                 <span className="font-mono text-[#35E0FF] font-semibold">24-Hour Offline Hackathon</span>
               </div>
             </div>

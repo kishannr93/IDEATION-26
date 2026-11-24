@@ -170,7 +170,12 @@ interface HackathonContextType {
   exportTeamsToSQL: () => void;
   resetAllData: () => void;
   syncAllToCloud: () => Promise<{ success: boolean; syncedAt: string }>;
+  refreshAllFromCloud: () => Promise<{ success: boolean; syncedAt: string }>;
   isSyncingAll: boolean;
+  isFetchingAll: boolean;
+  lastSyncedAt: string | null;
+  syncStatus: 'live' | 'syncing' | 'offline';
+  isCloudHydrated: boolean;
 
   // Google Sheets & Cloud Sync
   googleUser: User | null;
@@ -224,6 +229,7 @@ export const HackathonProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         const parsed = JSON.parse(saved);
         if (parsed.dateStart && parsed.dateStart.includes('2026-11')) {
           return {
+            ...initialEventConfig,
             ...parsed,
             dates: '1 & 2 December 2026',
             dateStart: '2026-12-01T09:00:00+05:30',
@@ -232,6 +238,7 @@ export const HackathonProvider: React.FC<{ children: React.ReactNode }> = ({ chi
           };
         }
         return {
+          ...initialEventConfig,
           ...parsed,
           whatsappGroupLink: parsed.whatsappGroupLink || initialEventConfig.whatsappGroupLink,
         };
@@ -342,6 +349,14 @@ export const HackathonProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   });
 
   const [isSyncingAll, setIsSyncingAll] = useState<boolean>(false);
+  const [isFetchingAll, setIsFetchingAll] = useState<boolean>(false);
+  const [lastSyncedAt, setLastSyncedAt] = useState<string | null>(() => {
+    return localStorage.getItem('ideation_last_synced_at') || null;
+  });
+  const [syncStatus, setSyncStatus] = useState<'live' | 'syncing' | 'offline'>(() =>
+    typeof navigator !== 'undefined' && navigator.onLine === false ? 'offline' : 'syncing'
+  );
+  const [isCloudHydrated, setIsCloudHydrated] = useState<boolean>(false);
 
   const [currentTeamSession, setCurrentTeamSession] = useState<RegisteredTeam | null>(null);
   const [selectedTrackForRegistration, setSelectedTrackForRegistration] = useState<string | null>(null);
@@ -368,6 +383,9 @@ export const HackathonProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     }
   })());
 
+  // Short grace window (8s) per section when THIS browser just performed an edit
+  const localDirtyUntilRef = React.useRef<Record<string, number>>({});
+
   // Track deleted team IDs across tabs/URLs/devices so deleted teams never resurrect
   const deletedTeamIdsRef = React.useRef<string[]>((() => {
     try {
@@ -380,8 +398,22 @@ export const HackathonProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   })());
 
   const coreTeamIndexIdsRef = React.useRef<string[] | null>(null);
+  const coreMembersPoolRef = React.useRef<Map<string, CoreTeamMember>>(
+    new Map(coreTeam.map((m) => [m.id, m]))
+  );
 
-  const recordSyncTimestamp = (key: string, isoOrMs?: string | number): number => {
+  const markSyncedNow = (iso?: string) => {
+    const ts = iso || new Date().toISOString();
+    setLastSyncedAt(ts);
+    setSyncStatus(typeof navigator !== 'undefined' && navigator.onLine === false ? 'offline' : 'live');
+    setIsCloudHydrated(true);
+    try {
+      localStorage.setItem('ideation_last_synced_at', ts);
+    } catch {}
+    return ts;
+  };
+
+  const recordSyncTimestamp = (key: string, isoOrMs?: string | number, markLocalDirty = false): number => {
     const ms =
       typeof isoOrMs === 'number'
         ? isoOrMs
@@ -389,16 +421,28 @@ export const HackathonProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         ? Date.parse(isoOrMs) || Date.now()
         : Date.now();
     syncTimestampsRef.current[key] = ms;
+    if (markLocalDirty) {
+      localDirtyUntilRef.current[key] = Date.now() + 8000;
+    }
     try {
       localStorage.setItem('ideation_sync_timestamps', JSON.stringify(syncTimestampsRef.current));
     } catch {}
     return ms;
   };
 
-  const shouldApplyRemoteUpdate = (key: string, remoteUpdatedAt?: string): boolean => {
+  const shouldApplyRemoteUpdate = (key: string, remoteUpdatedAt?: string, force = false): boolean => {
     const localTs = syncTimestampsRef.current[key] || 0;
-    if (!remoteUpdatedAt) return localTs === 0;
+    const isLocallyDirty = Date.now() < (localDirtyUntilRef.current[key] || 0);
+    if (!remoteUpdatedAt) {
+      return !isLocallyDirty && localTs === 0;
+    }
     const remoteTs = Date.parse(remoteUpdatedAt) || 0;
+    if (isLocallyDirty) {
+      return remoteTs > localTs;
+    }
+    if (force) {
+      return remoteTs >= localTs;
+    }
     if (localTs === 0) return true;
     return remoteTs > localTs;
   };
@@ -422,6 +466,74 @@ export const HackathonProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     setCurrentTeamSession((prev) => (prev && deletedSet.has(prev.id.toUpperCase()) ? null : prev));
   };
 
+  const getTeamLatestTimestampMs = (team?: RegisteredTeam): number => {
+    if (!team) return 0;
+    const candidates = [
+      team.updatedAt,
+      team.registeredAt,
+      team.checkedInAt,
+      team.submission?.evaluatedAt,
+      team.submission?.updatedAt,
+      team.submission?.submittedAt,
+      ...(Array.isArray(team.mealLogs) ? team.mealLogs.map((l) => l.scannedAt) : []),
+    ];
+    let maxMs = 0;
+    for (const c of candidates) {
+      if (typeof c === 'string' && c) {
+        const parsed = Date.parse(c);
+        if (!Number.isNaN(parsed) && parsed > maxMs) {
+          maxMs = parsed;
+        }
+      }
+    }
+    return maxMs;
+  };
+
+  const mergeTeamRecord = (incoming: RegisteredTeam, existing?: RegisteredTeam): RegisteredTeam => {
+    if (!existing) {
+      const logs = Array.isArray(incoming.mealLogs) ? incoming.mealLogs : [];
+      return {
+        ...incoming,
+        mealCode: incoming.mealCode || getTeamMealCode(incoming),
+        mealLogs: logs.length > 0 ? logs : undefined,
+      };
+    }
+
+    const incomingMs = getTeamLatestTimestampMs(incoming);
+    const existingMs = getTeamLatestTimestampMs(existing);
+    const winner = incomingMs >= existingMs ? incoming : existing;
+    const loser = winner === incoming ? existing : incoming;
+
+    const mergedLogs = mergeMealLogs(existing.mealLogs, incoming.mealLogs);
+
+    // Preserve large PPT binary data if Firestore sanitized it from >500KB doc
+    let mergedSubmission = winner.submission;
+    if (
+      mergedSubmission &&
+      !mergedSubmission.pptFileData &&
+      loser.submission?.pptFileData &&
+      (mergedSubmission.submissionCount || 0) <= (loser.submission.submissionCount || 0)
+    ) {
+      mergedSubmission = {
+        ...mergedSubmission,
+        pptFileData: loser.submission.pptFileData,
+        pptFileName: mergedSubmission.pptFileName || loser.submission.pptFileName,
+      };
+    }
+
+    return {
+      ...winner,
+      paymentScreenshotUrl: winner.paymentScreenshotUrl || loser.paymentScreenshotUrl,
+      mealCode: winner.mealCode || loser.mealCode || getTeamMealCode(winner),
+      mealLogs: mergedLogs.length > 0 ? mergedLogs : undefined,
+      submission: mergedSubmission,
+      updatedAt:
+        incomingMs >= existingMs
+          ? incoming.updatedAt || existing.updatedAt || new Date(Math.max(incomingMs, existingMs)).toISOString()
+          : existing.updatedAt || incoming.updatedAt,
+    };
+  };
+
   const applyTeamsSnapshot = (incomingTeams: RegisteredTeam[], authoritative: boolean) => {
     const deletedSet = new Set(deletedTeamIdsRef.current.map((id) => id.toUpperCase()));
     const cleanIncoming = incomingTeams.filter((t) => t?.id && !deletedSet.has(t.id.toUpperCase()));
@@ -430,25 +542,16 @@ export const HackathonProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       const prevMap = new Map<string, RegisteredTeam>();
       prev.forEach((t) => prevMap.set(t.id, t));
 
-      const mergeTeamRecord = (incoming: RegisteredTeam, existing?: RegisteredTeam): RegisteredTeam => {
-        const mergedLogs = mergeMealLogs(existing?.mealLogs, incoming.mealLogs);
-        return {
-          ...incoming,
-          mealCode: incoming.mealCode || existing?.mealCode || getTeamMealCode(incoming),
-          mealLogs: mergedLogs.length > 0 ? mergedLogs : undefined,
-        };
-      };
-
       let nextList: RegisteredTeam[];
       if (authoritative) {
         const map = new Map<string, RegisteredTeam>();
         cleanIncoming.forEach((t) => map.set(t.id, mergeTeamRecord(t, prevMap.get(t.id))));
-        // Preserve very recent (<15s) local registrations still propagating to cloud
+        // Preserve very recent (<20s) local registrations still propagating to cloud
         const now = Date.now();
         prev.forEach((t) => {
           if (!deletedSet.has(t.id.toUpperCase()) && !map.has(t.id)) {
             const ageMs = now - new Date(t.registeredAt).getTime();
-            if (!Number.isNaN(ageMs) && ageMs >= 0 && ageMs < 15000) {
+            if (!Number.isNaN(ageMs) && ageMs >= 0 && ageMs < 20000) {
               map.set(t.id, mergeTeamRecord(t));
             }
           }
@@ -474,38 +577,53 @@ export const HackathonProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     });
   };
 
+  const rebuildCoreTeamFromIndex = (indexIds: string[], fallbackMembers?: CoreTeamMember[]) => {
+    coreTeamIndexIdsRef.current = indexIds;
+    if (Array.isArray(fallbackMembers)) {
+      fallbackMembers.forEach((m) => coreMembersPoolRef.current.set(m.id, m));
+    }
+    setCoreTeam((prev) => {
+      prev.forEach((m) => {
+        if (!coreMembersPoolRef.current.has(m.id)) {
+          coreMembersPoolRef.current.set(m.id, m);
+        }
+      });
+      if (indexIds.length === 0) {
+        return [];
+      }
+      const ordered = indexIds
+        .map((id) => coreMembersPoolRef.current.get(id))
+        .filter((m): m is CoreTeamMember => Boolean(m));
+      return ordered.length > 0 ? ordered.sort((a, b) => a.order - b.order) : prev;
+    });
+  };
+
   const applyCoreTeamSnapshot = (remoteMembers: CoreTeamMember[], fromServer: boolean) => {
     if (!Array.isArray(remoteMembers)) return;
     if (remoteMembers.length === 0 && !fromServer) return;
 
-    setCoreTeam((prev) => {
-      const indexIds = coreTeamIndexIdsRef.current;
-      if (indexIds && indexIds.length > 0) {
-        const map = new Map<string, CoreTeamMember>();
-        prev.forEach((m) => map.set(m.id, m));
-        remoteMembers.forEach((m) => map.set(m.id, m));
-        const ordered: CoreTeamMember[] = [];
-        indexIds.forEach((id) => {
-          const item = map.get(id);
-          if (item) ordered.push(item);
-        });
-        // Include any newly added docs not yet in index
-        remoteMembers.forEach((m) => {
-          if (!indexIds.includes(m.id)) ordered.push(m);
-        });
-        return ordered.sort((a, b) => a.order - b.order);
-      }
-
-      // If remote has fewer members than default set without an explicit index, merge safely
-      if (remoteMembers.length < prev.length && remoteMembers.length <= 3) {
-        const map = new Map<string, CoreTeamMember>();
-        prev.forEach((m) => map.set(m.id, m));
-        remoteMembers.forEach((m) => map.set(m.id, m));
-        return Array.from(map.values()).sort((a, b) => a.order - b.order);
-      }
-
-      return remoteMembers.length > 0 || fromServer ? [...remoteMembers].sort((a, b) => a.order - b.order) : prev;
+    remoteMembers.forEach((m) => {
+      coreMembersPoolRef.current.set(m.id, m);
     });
+
+    const indexIds = coreTeamIndexIdsRef.current;
+    if (indexIds !== null) {
+      if (indexIds.length === 0) {
+        setCoreTeam([]);
+        return;
+      }
+      const ordered = indexIds
+        .map((id) => coreMembersPoolRef.current.get(id))
+        .filter((m): m is CoreTeamMember => Boolean(m));
+      if (ordered.length > 0) {
+        setCoreTeam(ordered.sort((a, b) => a.order - b.order));
+      }
+      return;
+    }
+
+    if (fromServer || remoteMembers.length > 0) {
+      setCoreTeam([...remoteMembers].sort((a, b) => a.order - b.order));
+    }
   };
 
   // Project PPT Submissions & Admin Alerts State
@@ -544,18 +662,19 @@ export const HackathonProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       }
     );
 
-    // Live multi-device Firestore subscriptions (any laptop, mobile, browser, and URL globally)
     const unsubDeletedTeams = subscribeFirestoreSiteContent<string>('deleted_teams', (payload) => {
       if (shouldApplyRemoteUpdate('deleted_teams', payload.updatedAt)) {
         applyDeletedIdsUpdate(payload.items, payload.updatedAt, true);
       } else if (payload.items.length > 0) {
         applyDeletedIdsUpdate(payload.items);
       }
+      markSyncedNow();
     });
 
     const unsubTeams = subscribeFirestoreTeams((cloudTeams, fromServer) => {
       if (cloudTeams && (cloudTeams.length > 0 || fromServer)) {
         applyTeamsSnapshot(cloudTeams, fromServer);
+        markSyncedNow();
       }
     });
 
@@ -564,11 +683,13 @@ export const HackathonProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         if (shouldApplyRemoteUpdate('config', remoteConfig.updatedAt)) {
           recordSyncTimestamp('config', remoteConfig.updatedAt);
           setEventConfig((prev) => ({
+            ...initialEventConfig,
             ...prev,
             ...remoteConfig,
             whatsappGroupLink: remoteConfig.whatsappGroupLink || prev.whatsappGroupLink || initialEventConfig.whatsappGroupLink,
           }));
         }
+        markSyncedNow();
       }
     });
 
@@ -577,6 +698,7 @@ export const HackathonProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         recordSyncTimestamp('announcements', payload.updatedAt);
         setAnnouncements(payload.items);
       }
+      markSyncedNow();
     });
 
     const unsubAnnouncements = subscribeFirestoreAnnouncements((remoteAnnouncements, fromServer) => {
@@ -588,17 +710,14 @@ export const HackathonProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     const unsubCoreTeamIndex = subscribeFirestoreSiteContent<string>('core_team_index', (payload) => {
       if (shouldApplyRemoteUpdate('core_team_index', payload.updatedAt)) {
         recordSyncTimestamp('core_team_index', payload.updatedAt);
-        coreTeamIndexIdsRef.current = payload.items;
-        setCoreTeam((prev) => {
-          const map = new Map(prev.map((m) => [m.id, m]));
-          const filtered = payload.items.map((id) => map.get(id)).filter((m): m is CoreTeamMember => Boolean(m));
-          return filtered.length > 0 ? filtered.sort((a, b) => a.order - b.order) : prev;
-        });
+        rebuildCoreTeamFromIndex(payload.items);
       }
+      markSyncedNow();
     });
 
     const unsubCoreTeam = subscribeFirestoreCoreTeam((remoteMembers, fromServer) => {
       applyCoreTeamSnapshot(remoteMembers, fromServer);
+      markSyncedNow();
     });
 
     const unsubTeamSections = subscribeFirestoreSiteContent<CustomTeamSection>('team_sections', (payload) => {
@@ -606,14 +725,16 @@ export const HackathonProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         recordSyncTimestamp('team_sections', payload.updatedAt);
         setCustomTeamSections([...payload.items].sort((a, b) => a.order - b.order));
       }
+      markSyncedNow();
     });
 
-    // Live cross-device subscriptions for Rules, Schedule, Tracks, Prizes, and FAQs
+    // Live cross-device subscriptions for Rules, Schedule, Tracks, Prizes, FAQs, and Submission Notifications
     const unsubRules = subscribeFirestoreSiteContent<RuleItem>('rules', (payload) => {
       if (shouldApplyRemoteUpdate('rules', payload.updatedAt)) {
         recordSyncTimestamp('rules', payload.updatedAt);
         setRules(payload.items);
       }
+      markSyncedNow();
     });
 
     const unsubSchedule = subscribeFirestoreSiteContent<ScheduleEvent>('schedule', (payload) => {
@@ -621,6 +742,7 @@ export const HackathonProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         recordSyncTimestamp('schedule', payload.updatedAt);
         setSchedule(normalizeScheduleDays(payload.items));
       }
+      markSyncedNow();
     });
 
     const unsubTracks = subscribeFirestoreSiteContent<DomainTrack>('tracks', (payload) => {
@@ -628,6 +750,7 @@ export const HackathonProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         recordSyncTimestamp('tracks', payload.updatedAt);
         setTracks(payload.items);
       }
+      markSyncedNow();
     });
 
     const unsubPrizes = subscribeFirestoreSiteContent<PrizeItem>('prizes', (payload) => {
@@ -635,6 +758,7 @@ export const HackathonProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         recordSyncTimestamp('prizes', payload.updatedAt);
         setPrizes(payload.items);
       }
+      markSyncedNow();
     });
 
     const unsubFaqs = subscribeFirestoreSiteContent<FAQItem>('faqs', (payload) => {
@@ -642,7 +766,19 @@ export const HackathonProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         recordSyncTimestamp('faqs', payload.updatedAt);
         setFAQsSafe(payload.items);
       }
+      markSyncedNow();
     });
+
+    const unsubSubmissionNotifications = subscribeFirestoreSiteContent<SubmissionNotification>(
+      'submission_notifications',
+      (payload) => {
+        if (shouldApplyRemoteUpdate('submission_notifications', payload.updatedAt)) {
+          recordSyncTimestamp('submission_notifications', payload.updatedAt);
+          setSubmissionNotifications(payload.items);
+        }
+        markSyncedNow();
+      }
+    );
 
     return () => {
       unsubAuth();
@@ -659,6 +795,7 @@ export const HackathonProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       unsubTracks();
       unsubPrizes();
       unsubFaqs();
+      unsubSubmissionNotifications();
     };
   }, []);
 
@@ -807,7 +944,7 @@ export const HackathonProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   // Persist structured content section globally (Firestore + Central Express DB + BroadcastChannel)
   const persistContentSection = <T,>(section: SiteContentSection, items: T[]) => {
     const nowIso = new Date().toISOString();
-    recordSyncTimestamp(section, nowIso);
+    recordSyncTimestamp(section, nowIso, true);
     saveSiteContentToFirestore(section, items, nowIso);
     fetch(`/api/content/${section}`, {
       method: 'POST',
@@ -817,69 +954,310 @@ export const HackathonProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     broadcastLiveSync(`SYNC_${section.toUpperCase()}`);
   };
 
-  // Pull all state from Firestore (cross-URL / cross-device) + local Express DB
-  const pullAllFromCloud = async () => {
+  // Unified Two-Way Cloud + Express Fetch & Reconcile (guarantees everyone gets the exact same data across every URL & device)
+  const refreshAllFromCloud = async (explicitFetch = false): Promise<{ success: boolean; syncedAt: string }> => {
+    if (explicitFetch) {
+      setIsFetchingAll(true);
+    }
+    setSyncStatus('syncing');
+
     try {
-      const snapshot = await fetchAllFromFirestore();
-      const deletedDoc = snapshot.sections.deleted_teams;
-      if (deletedDoc) {
-        if (shouldApplyRemoteUpdate('deleted_teams', deletedDoc.updatedAt)) {
-          applyDeletedIdsUpdate(deletedDoc.items as string[], deletedDoc.updatedAt, true);
-        } else {
-          applyDeletedIdsUpdate(deletedDoc.items as string[]);
+      const [snapshot, srvJson] = await Promise.all([
+        fetchAllFromFirestore().catch(() => null),
+        fetch('/api/sync/all')
+          .then((r) => (r.ok ? r.json() : null))
+          .catch(() => null),
+      ]);
+
+      const srv = srvJson?.success ? srvJson : null;
+      const toMs = (iso?: string): number => {
+        if (!iso || typeof iso !== 'string') return 0;
+        const parsed = Date.parse(iso);
+        return Number.isNaN(parsed) ? 0 : parsed;
+      };
+
+      const firestorePromotePromises: Promise<unknown>[] = [];
+      const serverMirrorPayload: Record<string, any> = {};
+      let needsServerMirror = false;
+
+      // 1. Deleted Team IDs (union across Firestore + Express + local so deleted teams stay deleted everywhere)
+      const fsDeletedDoc = snapshot?.sections?.deleted_teams;
+      const srvDeletedDoc = srv?.deletedTeamsSection;
+      const srvDeletedList: string[] = Array.isArray(srvDeletedDoc?.items)
+        ? srvDeletedDoc.items
+        : Array.isArray(srv?.deletedTeamIds)
+        ? srv.deletedTeamIds
+        : [];
+      const fsDeletedList: string[] = Array.isArray(fsDeletedDoc?.items) ? fsDeletedDoc.items : [];
+      const combinedDeletedIds = Array.from(
+        new Set(
+          [...deletedTeamIdsRef.current, ...fsDeletedList, ...srvDeletedList]
+            .map((id) => String(id).toUpperCase())
+            .filter(Boolean)
+        )
+      );
+      const deletedSet = new Set(combinedDeletedIds);
+
+      if (combinedDeletedIds.length > 0 || fsDeletedDoc || srvDeletedDoc) {
+        const latestDelMs = Math.max(toMs(fsDeletedDoc?.updatedAt), toMs(srvDeletedDoc?.updatedAt));
+        const latestDelIso = latestDelMs > 0 ? new Date(latestDelMs).toISOString() : new Date().toISOString();
+        applyDeletedIdsUpdate(combinedDeletedIds, latestDelIso, combinedDeletedIds.length === 0);
+
+        if (combinedDeletedIds.length > fsDeletedList.length) {
+          firestorePromotePromises.push(saveSiteContentToFirestore('deleted_teams', combinedDeletedIds, latestDelIso));
+          combinedDeletedIds.forEach((id) => {
+            firestorePromotePromises.push(deleteTeamFromFirestore(id));
+          });
+        }
+        if (combinedDeletedIds.length > srvDeletedList.length) {
+          serverMirrorPayload.deletedTeamIds = combinedDeletedIds;
+          needsServerMirror = true;
         }
       }
-      if (snapshot.config && Object.keys(snapshot.config).length > 0) {
-        if (shouldApplyRemoteUpdate('config', snapshot.config.updatedAt)) {
-          recordSyncTimestamp('config', snapshot.config.updatedAt);
+
+      // 2. Event Config (Site Settings, Registration Open/Close, Dates, Fees, Links)
+      const fsConfig = snapshot?.config && Object.keys(snapshot.config).length > 0 ? snapshot.config : null;
+      const srvConfig = srv?.config && typeof srv.config === 'object' && Object.keys(srv.config).length > 0 ? srv.config : null;
+      const fsConfigMs = toMs(fsConfig?.updatedAt);
+      const srvConfigMs = toMs(srvConfig?.updatedAt);
+
+      let winningConfig: Partial<EventConfig> | null = null;
+      if (fsConfig && srvConfig) {
+        winningConfig = srvConfigMs > fsConfigMs ? srvConfig : fsConfig;
+      } else {
+        winningConfig = fsConfig || srvConfig;
+      }
+
+      if (winningConfig) {
+        const winningConfigIso = winningConfig.updatedAt || new Date(Math.max(fsConfigMs, srvConfigMs, Date.now())).toISOString();
+        if (srvConfig && (!fsConfig || srvConfigMs > fsConfigMs)) {
+          firestorePromotePromises.push(saveSiteConfigToFirestore(winningConfig, winningConfigIso));
+        } else if (fsConfig && (!srvConfig || fsConfigMs > srvConfigMs)) {
+          serverMirrorPayload.config = { ...winningConfig, updatedAt: winningConfigIso };
+          needsServerMirror = true;
+        }
+
+        if (shouldApplyRemoteUpdate('config', winningConfigIso, explicitFetch)) {
+          recordSyncTimestamp('config', winningConfigIso);
           setEventConfig((prev) => ({
+            ...initialEventConfig,
             ...prev,
-            ...snapshot.config,
-            whatsappGroupLink: snapshot.config?.whatsappGroupLink || prev.whatsappGroupLink || initialEventConfig.whatsappGroupLink,
+            ...winningConfig,
+            whatsappGroupLink:
+              winningConfig?.whatsappGroupLink || prev.whatsappGroupLink || initialEventConfig.whatsappGroupLink,
           }));
         }
       }
-      if (snapshot.sections.rules && shouldApplyRemoteUpdate('rules', snapshot.sections.rules.updatedAt)) {
-        recordSyncTimestamp('rules', snapshot.sections.rules.updatedAt);
-        setRules(snapshot.sections.rules.items as RuleItem[]);
+
+      // 3. Helper to reconcile structured sections cleanly between Firestore & Express
+      const pickSectionWinner = <T,>(
+        sectionKey: SiteContentSection,
+        srvSectionObj?: { items?: T[]; updatedAt?: string } | null
+      ): { items: T[]; updatedAt: string } | null => {
+        const fsDoc = snapshot?.sections?.[sectionKey];
+        const fsHas = Boolean(fsDoc && Array.isArray(fsDoc.items));
+        const srvHas = Boolean(srvSectionObj && Array.isArray(srvSectionObj.items));
+        const fsMs = fsHas ? toMs(fsDoc?.updatedAt) : 0;
+        const srvMs = srvHas ? toMs(srvSectionObj?.updatedAt) : 0;
+
+        if (!fsHas && !srvHas) return null;
+
+        let winnerItems: T[];
+        let winnerIso: string;
+
+        if (srvHas && (!fsHas || srvMs > fsMs)) {
+          winnerItems = srvSectionObj!.items as T[];
+          winnerIso = srvSectionObj!.updatedAt || new Date().toISOString();
+          firestorePromotePromises.push(saveSiteContentToFirestore(sectionKey, winnerItems, winnerIso));
+        } else {
+          winnerItems = fsDoc!.items as T[];
+          winnerIso = fsDoc!.updatedAt || new Date().toISOString();
+          if (!srvHas || fsMs > srvMs) {
+            if (sectionKey === 'rules') serverMirrorPayload.rules = winnerItems;
+            else if (sectionKey === 'schedule') serverMirrorPayload.schedule = winnerItems;
+            else if (sectionKey === 'tracks') serverMirrorPayload.tracks = winnerItems;
+            else if (sectionKey === 'prizes') serverMirrorPayload.prizes = winnerItems;
+            else if (sectionKey === 'faqs') serverMirrorPayload.faqs = winnerItems;
+            else if (sectionKey === 'team_sections') serverMirrorPayload.teamSections = winnerItems;
+            else if (sectionKey === 'announcements') serverMirrorPayload.announcements = winnerItems;
+            else if (sectionKey === 'submission_notifications') serverMirrorPayload.submissionNotifications = winnerItems;
+            needsServerMirror = true;
+          }
+        }
+
+        return { items: winnerItems, updatedAt: winnerIso };
+      };
+
+      const rulesWinner = pickSectionWinner<RuleItem>('rules', srv?.rules);
+      if (rulesWinner && shouldApplyRemoteUpdate('rules', rulesWinner.updatedAt, explicitFetch)) {
+        recordSyncTimestamp('rules', rulesWinner.updatedAt);
+        setRules(rulesWinner.items);
       }
-      if (snapshot.sections.schedule && shouldApplyRemoteUpdate('schedule', snapshot.sections.schedule.updatedAt)) {
-        recordSyncTimestamp('schedule', snapshot.sections.schedule.updatedAt);
-        setSchedule(normalizeScheduleDays(snapshot.sections.schedule.items as ScheduleEvent[]));
+
+      const scheduleWinner = pickSectionWinner<ScheduleEvent>('schedule', srv?.schedule);
+      if (scheduleWinner && shouldApplyRemoteUpdate('schedule', scheduleWinner.updatedAt, explicitFetch)) {
+        recordSyncTimestamp('schedule', scheduleWinner.updatedAt);
+        setSchedule(normalizeScheduleDays(scheduleWinner.items));
       }
-      if (snapshot.sections.tracks && shouldApplyRemoteUpdate('tracks', snapshot.sections.tracks.updatedAt)) {
-        recordSyncTimestamp('tracks', snapshot.sections.tracks.updatedAt);
-        setTracks(snapshot.sections.tracks.items as DomainTrack[]);
+
+      const tracksWinner = pickSectionWinner<DomainTrack>('tracks', srv?.tracks);
+      if (tracksWinner && shouldApplyRemoteUpdate('tracks', tracksWinner.updatedAt, explicitFetch)) {
+        recordSyncTimestamp('tracks', tracksWinner.updatedAt);
+        setTracks(tracksWinner.items);
       }
-      if (snapshot.sections.prizes && shouldApplyRemoteUpdate('prizes', snapshot.sections.prizes.updatedAt)) {
-        recordSyncTimestamp('prizes', snapshot.sections.prizes.updatedAt);
-        setPrizes(snapshot.sections.prizes.items as PrizeItem[]);
+
+      const prizesWinner = pickSectionWinner<PrizeItem>('prizes', srv?.prizes);
+      if (prizesWinner && shouldApplyRemoteUpdate('prizes', prizesWinner.updatedAt, explicitFetch)) {
+        recordSyncTimestamp('prizes', prizesWinner.updatedAt);
+        setPrizes(prizesWinner.items);
       }
-      if (snapshot.sections.faqs && shouldApplyRemoteUpdate('faqs', snapshot.sections.faqs.updatedAt)) {
-        recordSyncTimestamp('faqs', snapshot.sections.faqs.updatedAt);
-        setFaqs(snapshot.sections.faqs.items as FAQItem[]);
+
+      const faqsWinner = pickSectionWinner<FAQItem>('faqs', srv?.faqs);
+      if (faqsWinner && shouldApplyRemoteUpdate('faqs', faqsWinner.updatedAt, explicitFetch)) {
+        recordSyncTimestamp('faqs', faqsWinner.updatedAt);
+        setFaqs(faqsWinner.items);
       }
-      if (snapshot.sections.announcements && shouldApplyRemoteUpdate('announcements', snapshot.sections.announcements.updatedAt)) {
-        recordSyncTimestamp('announcements', snapshot.sections.announcements.updatedAt);
-        setAnnouncements(snapshot.sections.announcements.items as Announcement[]);
-      } else if (!syncTimestampsRef.current['announcements'] && snapshot.announcements.length > 0) {
-        setAnnouncements(snapshot.announcements);
+
+      const teamSectionsWinner = pickSectionWinner<CustomTeamSection>('team_sections', srv?.teamSections);
+      if (teamSectionsWinner && shouldApplyRemoteUpdate('team_sections', teamSectionsWinner.updatedAt, explicitFetch)) {
+        recordSyncTimestamp('team_sections', teamSectionsWinner.updatedAt);
+        setCustomTeamSections([...teamSectionsWinner.items].sort((a, b) => a.order - b.order));
       }
-      if (snapshot.sections.core_team_index && shouldApplyRemoteUpdate('core_team_index', snapshot.sections.core_team_index.updatedAt)) {
-        recordSyncTimestamp('core_team_index', snapshot.sections.core_team_index.updatedAt);
-        coreTeamIndexIdsRef.current = snapshot.sections.core_team_index.items as string[];
+
+      const srvAnnouncementsFallback =
+        srv?.announcementsSection ||
+        (Array.isArray(srv?.announcements) && srv.announcements.length > 0
+          ? { items: srv.announcements, updatedAt: srv.timestamp || new Date().toISOString() }
+          : null);
+      const announcementsWinner = pickSectionWinner<Announcement>('announcements', srvAnnouncementsFallback);
+      if (announcementsWinner && shouldApplyRemoteUpdate('announcements', announcementsWinner.updatedAt, explicitFetch)) {
+        recordSyncTimestamp('announcements', announcementsWinner.updatedAt);
+        setAnnouncements(announcementsWinner.items);
+        announcementsWinner.items.forEach((ann) => {
+          firestorePromotePromises.push(saveAnnouncementToFirestore(ann));
+        });
+      } else if (!announcementsWinner) {
+        const fallbackAnns =
+          snapshot?.announcements && snapshot.announcements.length > 0
+            ? snapshot.announcements
+            : Array.isArray(srv?.announcements)
+            ? srv.announcements
+            : null;
+        if (fallbackAnns) {
+          setAnnouncements(fallbackAnns);
+        }
       }
-      if (snapshot.coreTeam.length > 0) {
-        applyCoreTeamSnapshot(snapshot.coreTeam, true);
+
+      const subNotifWinner = pickSectionWinner<SubmissionNotification>(
+        'submission_notifications',
+        srv?.submissionNotifications
+      );
+      if (subNotifWinner && shouldApplyRemoteUpdate('submission_notifications', subNotifWinner.updatedAt, explicitFetch)) {
+        recordSyncTimestamp('submission_notifications', subNotifWinner.updatedAt);
+        setSubmissionNotifications(subNotifWinner.items);
       }
-      if (snapshot.sections.team_sections && shouldApplyRemoteUpdate('team_sections', snapshot.sections.team_sections.updatedAt)) {
-        recordSyncTimestamp('team_sections', snapshot.sections.team_sections.updatedAt);
-        setCustomTeamSections([...(snapshot.sections.team_sections.items as CustomTeamSection[])].sort((a, b) => a.order - b.order));
+
+      // 4. Core Team & Core Team Index (no <= 3 resurrection bug!)
+      const fsCoreMembers = snapshot?.coreTeam || [];
+      const srvCoreMembers: CoreTeamMember[] = Array.isArray(srv?.coreTeam) ? srv.coreTeam : [];
+      srvCoreMembers.forEach((m) => coreMembersPoolRef.current.set(m.id, m));
+      fsCoreMembers.forEach((m) => coreMembersPoolRef.current.set(m.id, m));
+
+      const fsCoreMap = new Map(fsCoreMembers.map((m) => [m.id, m]));
+      srvCoreMembers.forEach((m) => {
+        if (!fsCoreMap.has(m.id)) {
+          firestorePromotePromises.push(saveCoreMemberToFirestore(m));
+        }
+      });
+
+      const srvCoreIndexFallback =
+        srv?.coreTeamIndex ||
+        (srvCoreMembers.length > 0
+          ? { items: srvCoreMembers.map((m) => m.id), updatedAt: srv?.timestamp || new Date().toISOString() }
+          : null);
+      const coreIndexWinner = pickSectionWinner<string>('core_team_index', srvCoreIndexFallback);
+      if (coreIndexWinner && shouldApplyRemoteUpdate('core_team_index', coreIndexWinner.updatedAt, explicitFetch)) {
+        recordSyncTimestamp('core_team_index', coreIndexWinner.updatedAt);
+        const combinedPool = [...srvCoreMembers, ...fsCoreMembers];
+        rebuildCoreTeamFromIndex(coreIndexWinner.items, combinedPool);
+        if (needsServerMirror) {
+          const orderedForServer = coreIndexWinner.items
+            .map((id) => coreMembersPoolRef.current.get(id))
+            .filter((m): m is CoreTeamMember => Boolean(m));
+          if (orderedForServer.length > 0) {
+            serverMirrorPayload.coreTeam = orderedForServer;
+          }
+        }
+      } else if (coreIndexWinner) {
+        applyCoreTeamSnapshot([...srvCoreMembers, ...fsCoreMembers], true);
+      } else if (fsCoreMembers.length > 0 || srvCoreMembers.length > 0) {
+        applyCoreTeamSnapshot(fsCoreMembers.length > 0 ? fsCoreMembers : srvCoreMembers, true);
       }
-      if (snapshot.teams.length > 0 || deletedDoc) {
-        applyTeamsSnapshot(snapshot.teams, true);
+
+      // 5. Registered Teams (timestamp-reconciled union across Firestore & Express)
+      const fsTeams = (snapshot?.teams || []).filter((t) => t?.id && !deletedSet.has(t.id.toUpperCase()));
+      const srvTeams: RegisteredTeam[] = (Array.isArray(srv?.teams) ? srv.teams : []).filter(
+        (t: RegisteredTeam) => t?.id && !deletedSet.has(t.id.toUpperCase())
+      );
+
+      const fsTeamMap = new Map<string, RegisteredTeam>(fsTeams.map((t) => [t.id, t]));
+      const srvTeamMap = new Map<string, RegisteredTeam>(srvTeams.map((t) => [t.id, t]));
+      const allTeamIds = new Set<string>([...fsTeamMap.keys(), ...srvTeamMap.keys()]);
+      const reconciledTeams: RegisteredTeam[] = [];
+
+      allTeamIds.forEach((teamId) => {
+        const fsT = fsTeamMap.get(teamId);
+        const srvT = srvTeamMap.get(teamId);
+        if (fsT && srvT) {
+          const merged = mergeTeamRecord(fsT, srvT);
+          reconciledTeams.push(merged);
+          const fsMs = getTeamLatestTimestampMs(fsT);
+          const srvMs = getTeamLatestTimestampMs(srvT);
+          if (srvMs > fsMs) {
+            firestorePromotePromises.push(saveTeamToFirestore(merged));
+          } else if (fsMs > srvMs) {
+            needsServerMirror = true;
+          }
+        } else if (fsT) {
+          reconciledTeams.push(fsT);
+          needsServerMirror = true;
+        } else if (srvT) {
+          reconciledTeams.push(srvT);
+          firestorePromotePromises.push(saveTeamToFirestore(srvT));
+        }
+      });
+
+      if (reconciledTeams.length > 0 || snapshot !== null) {
+        applyTeamsSnapshot(reconciledTeams, true);
+        if (needsServerMirror) {
+          serverMirrorPayload.teams = reconciledTeams;
+        }
       }
-    } catch {}
+
+      if (firestorePromotePromises.length > 0) {
+        await Promise.all(firestorePromotePromises).catch(() => {});
+      }
+      if (needsServerMirror && Object.keys(serverMirrorPayload).length > 0) {
+        serverMirrorPayload.updatedAt = new Date().toISOString();
+        fetch('/api/sync/push-all', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(serverMirrorPayload),
+        }).catch(() => {});
+      }
+
+      const syncedAt = markSyncedNow();
+      return { success: true, syncedAt };
+    } catch (err) {
+      console.warn('refreshAllFromCloud warning:', err);
+      setSyncStatus(typeof navigator !== 'undefined' && navigator.onLine === false ? 'offline' : 'live');
+      const fallbackAt = new Date().toISOString();
+      return { success: false, syncedAt: fallbackAt };
+    } finally {
+      if (explicitFetch) {
+        setIsFetchingAll(false);
+      }
+    }
   };
 
   // Central Database Synchronization & Live Polling (Teams, Config, News, Team, Rules, Schedule, Tracks, Prizes, FAQs)
@@ -908,7 +1286,8 @@ export const HackathonProvider: React.FC<{ children: React.ReactNode }> = ({ chi
             if (json.config && typeof json.config === 'object' && Object.keys(json.config).length > 0) {
               if (shouldApplyRemoteUpdate('config', json.config.updatedAt)) {
                 recordSyncTimestamp('config', json.config.updatedAt);
-                setEventConfig(prev => ({
+                setEventConfig((prev) => ({
+                  ...initialEventConfig,
                   ...prev,
                   ...json.config,
                   whatsappGroupLink: json.config?.whatsappGroupLink || prev.whatsappGroupLink || initialEventConfig.whatsappGroupLink,
@@ -923,9 +1302,8 @@ export const HackathonProvider: React.FC<{ children: React.ReactNode }> = ({ chi
             }
             if (json.coreTeamIndex && Array.isArray(json.coreTeamIndex.items) && shouldApplyRemoteUpdate('core_team_index', json.coreTeamIndex.updatedAt)) {
               recordSyncTimestamp('core_team_index', json.coreTeamIndex.updatedAt);
-              coreTeamIndexIdsRef.current = json.coreTeamIndex.items;
-            }
-            if (Array.isArray(json.coreTeam) && json.coreTeam.length > 0) {
+              rebuildCoreTeamFromIndex(json.coreTeamIndex.items, Array.isArray(json.coreTeam) ? json.coreTeam : undefined);
+            } else if (Array.isArray(json.coreTeam) && json.coreTeam.length > 0) {
               applyCoreTeamSnapshot(json.coreTeam, false);
             }
             if (json.teamSections && Array.isArray(json.teamSections.items) && shouldApplyRemoteUpdate('team_sections', json.teamSections.updatedAt)) {
@@ -952,6 +1330,14 @@ export const HackathonProvider: React.FC<{ children: React.ReactNode }> = ({ chi
               recordSyncTimestamp('faqs', json.faqs.updatedAt);
               setFaqs(json.faqs.items);
             }
+            if (
+              json.submissionNotifications &&
+              Array.isArray(json.submissionNotifications.items) &&
+              shouldApplyRemoteUpdate('submission_notifications', json.submissionNotifications.updatedAt)
+            ) {
+              recordSyncTimestamp('submission_notifications', json.submissionNotifications.updatedAt);
+              setSubmissionNotifications(json.submissionNotifications.items);
+            }
           }
         } else {
           const teamsRes = await fetch('/api/teams');
@@ -967,25 +1353,31 @@ export const HackathonProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       }
     };
 
-    // Initial load: pull both Firestore (shared across all URLs) and local Express DB
-    pullAllFromCloud();
-    syncWithCentralDatabase();
+    // Initial load: run full two-way cloud + server reconciliation immediately
+    refreshAllFromCloud(false);
 
-    // Live polling every 2.5s for same-server updates + 15s cloud refresh fallback
-    const pollTimer = setInterval(syncWithCentralDatabase, 2500);
+    // Live polling every 4s for same-server updates + 15s full cloud refresh fallback
+    const pollTimer = setInterval(syncWithCentralDatabase, 4000);
     const cloudRefreshTimer = setInterval(() => {
-      if (isMounted) pullAllFromCloud();
+      if (isMounted) refreshAllFromCloud(false);
     }, 15000);
 
-    // Refresh immediately whenever tab gains focus or becomes visible on any device
+    // Refresh immediately whenever tab gains focus, becomes visible, or network reconnects
     const handleVisibilityOrFocus = () => {
       if (document.visibilityState === 'visible' && isMounted) {
-        pullAllFromCloud();
-        syncWithCentralDatabase();
+        refreshAllFromCloud(false);
       }
+    };
+    const handleOnline = () => {
+      if (isMounted) refreshAllFromCloud(false);
+    };
+    const handleOffline = () => {
+      if (isMounted) setSyncStatus('offline');
     };
     window.addEventListener('focus', handleVisibilityOrFocus);
     document.addEventListener('visibilitychange', handleVisibilityOrFocus);
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
 
     // Multi-tab broadcast channel
     let channel: BroadcastChannel | null = null;
@@ -993,8 +1385,7 @@ export const HackathonProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       channel = new BroadcastChannel('ideation_live_sync');
       channel.onmessage = () => {
         if (isMounted) {
-          syncWithCentralDatabase();
-          pullAllFromCloud();
+          refreshAllFromCloud(false);
         }
       };
     } catch {}
@@ -1005,13 +1396,15 @@ export const HackathonProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       clearInterval(cloudRefreshTimer);
       window.removeEventListener('focus', handleVisibilityOrFocus);
       document.removeEventListener('visibilitychange', handleVisibilityOrFocus);
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
       channel?.close();
     };
   }, [currentTeamSession?.id]);
 
   const updateEventConfig = (newConfig: Partial<EventConfig>) => {
     const nowIso = new Date().toISOString();
-    recordSyncTimestamp('config', nowIso);
+    recordSyncTimestamp('config', nowIso, true);
     setEventConfig(prev => {
       const merged = { ...prev, ...newConfig, updatedAt: nowIso };
       saveSiteConfigToFirestore(merged, nowIso);
@@ -1408,10 +1801,12 @@ export const HackathonProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     const nextNumber = (numericIds.length > 0 ? Math.max(...numericIds) : 0) + 1;
     const teamId = `IDN-${String(nextNumber).padStart(4, '0')}`;
 
+    const nowIso = new Date().toISOString();
     const newTeam: RegisteredTeam = {
       ...teamData,
       id: teamId,
-      registeredAt: new Date().toISOString(),
+      registeredAt: nowIso,
+      updatedAt: nowIso,
       checkedIn: false,
       mealCode: getTeamMealCode({ id: teamId, teamName: teamData.teamName }),
       mealLogs: [],
@@ -1463,10 +1858,32 @@ export const HackathonProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   };
 
   const updateTeam = (id: string, updated: Partial<RegisteredTeam>) => {
-    setRegisteredTeams(prev => prev.map(t => (t.id === id ? { ...t, ...updated } : t)));
+    const nowIso = new Date().toISOString();
+    const payload = { ...updated, updatedAt: nowIso };
+    let updatedRecord: RegisteredTeam | null = null;
+
+    setRegisteredTeams(prev =>
+      prev.map(t => {
+        if (t.id === id) {
+          updatedRecord = { ...t, ...payload };
+          return updatedRecord;
+        }
+        return t;
+      })
+    );
     if (currentTeamSession?.id === id) {
-      setCurrentTeamSession(prev => (prev ? { ...prev, ...updated } : null));
+      setCurrentTeamSession(prev => (prev ? { ...prev, ...payload } : null));
     }
+
+    if (updatedRecord) {
+      saveTeamToFirestore(updatedRecord);
+    }
+    fetch(`/api/teams/${encodeURIComponent(id)}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    }).catch(() => {});
+    broadcastLiveSync('SYNC_TEAMS');
   };
 
   const deleteTeam = async (id: string): Promise<{ success: boolean; error?: string }> => {
@@ -1484,7 +1901,11 @@ export const HackathonProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       if (currentTeamSession?.id.toUpperCase() === normalizedId) {
         setCurrentTeamSession(null);
       }
-      setSubmissionNotifications((prev) => prev.filter((n) => n.teamId.toUpperCase() !== normalizedId));
+      setSubmissionNotifications((prev) => {
+        const nextNotifs = prev.filter((n) => n.teamId.toUpperCase() !== normalizedId);
+        persistContentSection('submission_notifications', nextNotifs);
+        return nextNotifs;
+      });
 
       // 1. Delete from Firestore (all URLs & devices)
       await deleteTeamFromFirestore(id);
@@ -1521,6 +1942,7 @@ export const HackathonProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   };
 
   const updatePaymentStatus = (id: string, status: 'Pending' | 'Verified' | 'Rejected', remarks?: string) => {
+    const nowIso = new Date().toISOString();
     // 1. Update React state immediately
     setRegisteredTeams(prev =>
       prev.map(t => {
@@ -1529,6 +1951,7 @@ export const HackathonProvider: React.FC<{ children: React.ReactNode }> = ({ chi
             ...t,
             paymentStatus: status,
             paymentRemarks: remarks !== undefined ? remarks : t.paymentRemarks,
+            updatedAt: nowIso,
           };
           // Also update current active session immediately if it belongs to this team
           if (currentTeamSession?.id === id) {
@@ -1541,7 +1964,7 @@ export const HackathonProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     );
 
     // 2. Persist to Firestore Cloud Database
-    updateTeamPaymentInFirestore(id, status, remarks);
+    updateTeamPaymentInFirestore(id, status, remarks, nowIso);
 
     // 3. Persist to central database immediately via API
     fetch(`/api/teams/${encodeURIComponent(id)}/payment`, {
@@ -1559,11 +1982,7 @@ export const HackathonProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     }
 
     // 5. Broadcast to all open tabs and windows for instantaneous auto-refresh
-    try {
-      const channel = new BroadcastChannel('ideation_live_sync');
-      channel.postMessage({ type: 'SYNC_TEAMS', teamId: id, status });
-      channel.close();
-    } catch {}
+    broadcastLiveSync('SYNC_TEAMS');
   };
 
   const toggleCheckIn = (id: string) => {
@@ -1572,7 +1991,8 @@ export const HackathonProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       return { success: false, error: 'Team not found with ID ' + id };
     }
     const newStatus = !team.checkedIn;
-    const checkedInAt = newStatus ? new Date().toISOString() : undefined;
+    const nowIso = new Date().toISOString();
+    const checkedInAt = newStatus ? nowIso : undefined;
 
     setRegisteredTeams(prev =>
       prev.map(t =>
@@ -1581,17 +2001,18 @@ export const HackathonProvider: React.FC<{ children: React.ReactNode }> = ({ chi
               ...t,
               checkedIn: newStatus,
               checkedInAt,
+              updatedAt: nowIso,
             }
           : t
       )
     );
 
     if (currentTeamSession?.id === id) {
-      setCurrentTeamSession(prev => (prev ? { ...prev, checkedIn: newStatus, checkedInAt } : null));
+      setCurrentTeamSession(prev => (prev ? { ...prev, checkedIn: newStatus, checkedInAt, updatedAt: nowIso } : null));
     }
 
     // 1. Persist to Firestore Cloud Database
-    updateTeamCheckInInFirestore(id, newStatus, checkedInAt);
+    updateTeamCheckInInFirestore(id, newStatus, checkedInAt, nowIso);
 
     // 2. Persist to central database
     fetch(`/api/teams/${encodeURIComponent(id)}/checkin`, {
@@ -1603,11 +2024,7 @@ export const HackathonProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     });
 
     // 3. Broadcast
-    try {
-      const channel = new BroadcastChannel('ideation_live_sync');
-      channel.postMessage({ type: 'SYNC_TEAMS', teamId: id, checkedIn: newStatus });
-      channel.close();
-    } catch {}
+    broadcastLiveSync('SYNC_TEAMS');
 
     return { success: true, checkedIn: newStatus };
   };
@@ -1618,6 +2035,7 @@ export const HackathonProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       return { success: false, error: 'Team not found with ID ' + id };
     }
 
+    const nowIso = new Date().toISOString();
     setRegisteredTeams((prev) =>
       prev.map((t) =>
         t.id === id
@@ -1625,6 +2043,7 @@ export const HackathonProvider: React.FC<{ children: React.ReactNode }> = ({ chi
               ...t,
               checkedIn: false,
               checkedInAt: undefined,
+              updatedAt: nowIso,
             }
           : t
       )
@@ -1632,12 +2051,12 @@ export const HackathonProvider: React.FC<{ children: React.ReactNode }> = ({ chi
 
     if (currentTeamSession?.id === id) {
       setCurrentTeamSession((prev) =>
-        prev ? { ...prev, checkedIn: false, checkedInAt: undefined } : null
+        prev ? { ...prev, checkedIn: false, checkedInAt: undefined, updatedAt: nowIso } : null
       );
     }
 
     // 1. Clear in Firestore Cloud Database
-    updateTeamCheckInInFirestore(id, false, undefined);
+    updateTeamCheckInInFirestore(id, false, undefined, nowIso);
 
     // 2. Clear in Express Central Database
     fetch(`/api/teams/${encodeURIComponent(id)}/checkin`, {
@@ -1778,11 +2197,13 @@ export const HackathonProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       memberUsn: targetMember?.usn,
     };
 
+    const nowIso = new Date().toISOString();
     const nextLogs = [...existingLogs, newRecord];
     const updatedTeam: RegisteredTeam = {
       ...team,
       mealCode: resolvedCode,
       mealLogs: nextLogs,
+      updatedAt: nowIso,
     };
 
     const nextProgress = getTeamMealSlotProgress(updatedTeam, day, mealType);
@@ -1793,7 +2214,7 @@ export const HackathonProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     }
 
     // Persist to Firestore Cloud Database (cross-device live sync)
-    updateTeamMealLogsInFirestore(team.id, resolvedCode, nextLogs);
+    updateTeamMealLogsInFirestore(team.id, resolvedCode, nextLogs, nowIso);
 
     // Persist to Express Central Database
     const memberIdx = targetMember
@@ -1831,13 +2252,19 @@ export const HackathonProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   };
 
   const markNotificationAsRead = (id: string) => {
-    setSubmissionNotifications(prev =>
-      prev.map(n => (n.id === id ? { ...n, read: true } : n))
-    );
+    setSubmissionNotifications(prev => {
+      const next = prev.map(n => (n.id === id ? { ...n, read: true } : n));
+      persistContentSection('submission_notifications', next);
+      return next;
+    });
   };
 
   const markAllNotificationsAsRead = () => {
-    setSubmissionNotifications(prev => prev.map(n => ({ ...n, read: true })));
+    setSubmissionNotifications(prev => {
+      const next = prev.map(n => ({ ...n, read: true }));
+      persistContentSection('submission_notifications', next);
+      return next;
+    });
   };
 
   const submitProjectPresentation = async (
@@ -1906,6 +2333,7 @@ export const HackathonProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         submission: newSubmission,
         ideaTitle: newSubmission.projectTitle || team.ideaTitle,
         ideaSummary: newSubmission.ideaSummary || team.ideaSummary,
+        updatedAt: nowIso,
       };
 
       // 1. Update React State
@@ -1915,7 +2343,7 @@ export const HackathonProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       }
 
       // 2. Persist to Firestore
-      await updateTeamSubmissionInFirestore(teamId, newSubmission);
+      await updateTeamSubmissionInFirestore(teamId, newSubmission, nowIso);
 
       // 3. Persist to Central Database Server API
       fetch(`/api/teams/${encodeURIComponent(teamId)}/submission`, {
@@ -1942,7 +2370,11 @@ export const HackathonProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         read: false,
       };
 
-      setSubmissionNotifications(prev => [newNotif, ...prev.filter(n => n.teamId !== teamId)]);
+      setSubmissionNotifications(prev => {
+        const nextNotifs = [newNotif, ...prev.filter(n => n.teamId !== teamId)];
+        persistContentSection('submission_notifications', nextNotifs);
+        return nextNotifs;
+      });
 
       // 5. Send Real-Time Alert Email to Admin
       try {
@@ -2015,19 +2447,21 @@ export const HackathonProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         evaluationStatus: 'Under Review',
       };
 
+      const evalIso = new Date().toISOString();
       const updatedSubmission: ProjectSubmission = {
         ...existingSubmission,
         evaluationStatus: evaluation.status,
         score: evaluation.score !== undefined ? evaluation.score : existingSubmission.score,
         feedback: evaluation.feedback !== undefined ? evaluation.feedback : existingSubmission.feedback,
         evaluatedBy: evaluation.evaluatedBy || 'Jury Panel',
-        evaluatedAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
+        evaluatedAt: evalIso,
+        updatedAt: evalIso,
       };
 
       const updatedTeam: RegisteredTeam = {
         ...team,
         submission: updatedSubmission,
+        updatedAt: evalIso,
       };
 
       setRegisteredTeams(prev => prev.map(t => (t.id === teamId ? updatedTeam : t)));
@@ -2035,7 +2469,7 @@ export const HackathonProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         setCurrentTeamSession(updatedTeam);
       }
 
-      await updateTeamSubmissionInFirestore(teamId, updatedSubmission);
+      await updateTeamSubmissionInFirestore(teamId, updatedSubmission, evalIso);
 
       fetch(`/api/teams/${encodeURIComponent(teamId)}/evaluation`, {
         method: 'PATCH',
@@ -2272,22 +2706,24 @@ export const HackathonProvider: React.FC<{ children: React.ReactNode }> = ({ chi
 
   const syncAllToCloud = async (): Promise<{ success: boolean; syncedAt: string }> => {
     setIsSyncingAll(true);
+    setSyncStatus('syncing');
     const nowIso = new Date().toISOString();
     try {
       const mergedConfig = { ...eventConfig, updatedAt: nowIso };
       const coreIds = coreTeam.map((m) => m.id);
       coreTeamIndexIdsRef.current = coreIds;
 
-      recordSyncTimestamp('config', nowIso);
-      recordSyncTimestamp('rules', nowIso);
-      recordSyncTimestamp('schedule', nowIso);
-      recordSyncTimestamp('tracks', nowIso);
-      recordSyncTimestamp('prizes', nowIso);
-      recordSyncTimestamp('faqs', nowIso);
-      recordSyncTimestamp('announcements', nowIso);
-      recordSyncTimestamp('core_team_index', nowIso);
-      recordSyncTimestamp('team_sections', nowIso);
-      recordSyncTimestamp('deleted_teams', nowIso);
+      recordSyncTimestamp('config', nowIso, true);
+      recordSyncTimestamp('rules', nowIso, true);
+      recordSyncTimestamp('schedule', nowIso, true);
+      recordSyncTimestamp('tracks', nowIso, true);
+      recordSyncTimestamp('prizes', nowIso, true);
+      recordSyncTimestamp('faqs', nowIso, true);
+      recordSyncTimestamp('announcements', nowIso, true);
+      recordSyncTimestamp('core_team_index', nowIso, true);
+      recordSyncTimestamp('team_sections', nowIso, true);
+      recordSyncTimestamp('deleted_teams', nowIso, true);
+      recordSyncTimestamp('submission_notifications', nowIso, true);
 
       await Promise.all([
         saveSiteConfigToFirestore(mergedConfig, nowIso),
@@ -2300,9 +2736,10 @@ export const HackathonProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         saveSiteContentToFirestore('core_team_index', coreIds, nowIso),
         saveSiteContentToFirestore('team_sections', customTeamSections, nowIso),
         saveSiteContentToFirestore('deleted_teams', deletedTeamIdsRef.current, nowIso),
+        saveSiteContentToFirestore('submission_notifications', submissionNotifications, nowIso),
         ...coreTeam.map((m) => saveCoreMemberToFirestore(m)),
         ...announcements.map((a) => saveAnnouncementToFirestore(a)),
-        ...registeredTeams.map((t) => saveTeamToFirestore(t)),
+        ...registeredTeams.map((t) => saveTeamToFirestore({ ...t, updatedAt: t.updatedAt || nowIso })),
         ...deletedTeamIdsRef.current.map((delId) => deleteTeamFromFirestore(delId)),
       ]);
 
@@ -2322,13 +2759,16 @@ export const HackathonProvider: React.FC<{ children: React.ReactNode }> = ({ chi
           faqs,
           teams: registeredTeams,
           deletedTeamIds: deletedTeamIdsRef.current,
+          submissionNotifications,
         }),
       }).catch(() => {});
 
       broadcastLiveSync('SYNC_ALL');
+      markSyncedNow(nowIso);
       return { success: true, syncedAt: nowIso };
     } catch (err) {
       console.warn('syncAllToCloud warning:', err);
+      setSyncStatus(typeof navigator !== 'undefined' && navigator.onLine === false ? 'offline' : 'live');
       return { success: false, syncedAt: nowIso };
     } finally {
       setIsSyncingAll(false);
@@ -2443,7 +2883,12 @@ export const HackathonProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         exportTeamsToSQL,
         resetAllData,
         syncAllToCloud,
+        refreshAllFromCloud: () => refreshAllFromCloud(true),
         isSyncingAll,
+        isFetchingAll,
+        lastSyncedAt,
+        syncStatus,
+        isCloudHydrated,
         googleUser,
         googleAccessToken,
         isGoogleSheetsConnected,

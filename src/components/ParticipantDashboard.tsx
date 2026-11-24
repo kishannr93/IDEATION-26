@@ -39,6 +39,7 @@ import {
   Utensils,
   Lock,
   Unlock,
+  RefreshCw,
 } from 'lucide-react';
 import {
   buildTeamMealQrPayload,
@@ -65,6 +66,10 @@ export const ParticipantDashboard: React.FC = () => {
     setShowRegisterModal,
     submitProjectPresentation,
     announcements,
+    refreshAllFromCloud,
+    isFetchingAll,
+    lastSyncedAt,
+    syncStatus,
   } = useHackathon();
 
   const [loginEmailOrId, setLoginEmailOrId] = useState('');
@@ -550,6 +555,22 @@ export const ParticipantDashboard: React.FC = () => {
                 <span className="text-[10px] font-mono text-[#78AAFF]">
                   Ref: {currentTeamSession.paymentTransactionId}
                 </span>
+                <div className="flex items-center gap-2 mt-1">
+                  <button
+                    type="button"
+                    onClick={() => refreshAllFromCloud()}
+                    disabled={isFetchingAll}
+                    className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-[#081024] hover:bg-[#132247] border border-[#35E0FF]/35 text-[11px] font-mono font-semibold text-[#35E0FF] transition-colors cursor-pointer disabled:opacity-50"
+                  >
+                    <RefreshCw className={`w-3 h-3 ${isFetchingAll ? 'animate-spin' : ''}`} />
+                    <span>{isFetchingAll ? 'Syncing...' : 'Fetch Live Status'}</span>
+                  </button>
+                  {lastSyncedAt && (
+                    <span className="text-[10px] font-mono text-[#9DB0D0]">
+                      {syncStatus === 'offline' ? 'Offline' : new Date(lastSyncedAt).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })}
+                    </span>
+                  )}
+                </div>
               </div>
             </div>
 

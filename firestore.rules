@@ -11,7 +11,8 @@ service cloud.firestore {
         'announcements',
         'core_team_index',
         'team_sections',
-        'deleted_teams'
+        'deleted_teams',
+        'submission_notifications'
       ];
     }
 

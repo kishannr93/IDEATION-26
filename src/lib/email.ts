@@ -92,13 +92,13 @@ export const generatePassEmailHtml = (params: {
     </div>
     <div class="details">
       <p>Hello <strong>${params.leaderName}</strong>,</p>
-      <p>Your team <strong>${params.teamName}</strong> from <strong>${params.college}</strong> has successfully submitted registration for IDEATION 2026 on 18 & 19 November 2026.</p>
+      <p>Your team <strong>${params.teamName}</strong> from <strong>${params.college}</strong> has successfully submitted registration for IDEATION 2026 on 1 & 2 December 2026.</p>
       
       <div style="background: #081024; border-radius: 12px; padding: 16px; margin: 16px 0;">
         <div class="field"><span class="field-label">Primary Track:</span><span class="field-value">${params.trackName}</span></div>
         <div class="field"><span class="field-label">Payment Status:</span><span class="field-value" style="color: #FFC83D;">${params.paymentStatus}</span></div>
         <div class="field"><span class="field-label">Venue:</span><span class="field-value">BIET Main Campus, Davangere</span></div>
-        <div class="field"><span class="field-label">Event Dates:</span><span class="field-value">18 - 19 November 2026 (24 Hours)</span></div>
+        <div class="field"><span class="field-label">Event Dates:</span><span class="field-value">1 & 2 December 2026 (24 Hours)</span></div>
       </div>
 
       <div class="disclaimer">
@@ -166,7 +166,7 @@ export const generateApprovalEmailHtml = (params: {
         <div class="field"><span class="field-label">Team Name:</span><span class="field-value">${params.teamName}</span></div>
         <div class="field"><span class="field-label">College:</span><span class="field-value">${params.college}</span></div>
         <div class="field"><span class="field-label">Primary Track:</span><span class="field-value">${params.trackName}</span></div>
-        <div class="field"><span class="field-label">Reporting Date:</span><span class="field-value">18 November 2026, 08:00 AM IST</span></div>
+        <div class="field"><span class="field-label">Reporting Date:</span><span class="field-value">1 December 2026, 08:00 AM IST</span></div>
         <div class="field"><span class="field-label">Reporting Desk:</span><span class="field-value">BIET Main Auditorium, Davangere</span></div>
       </div>
 

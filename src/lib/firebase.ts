@@ -186,12 +186,30 @@ export async function testFirestoreConnection() {
 // FIRESTORE CLOUD DATABASE HELPERS FOR CENTRAL REGISTRATIONS
 // -----------------------------------------------------------------------------
 
+function sanitizeSubmissionForFirestore(submission: ProjectSubmission): ProjectSubmission {
+  const safeSub: ProjectSubmission = { ...submission };
+  try {
+    if (safeSub.pptFileData && JSON.stringify(safeSub).length > 500000) {
+      delete safeSub.pptFileData;
+    }
+  } catch {
+    delete safeSub.pptFileData;
+  }
+  return safeSub;
+}
+
 export async function saveTeamToFirestore(team: RegisteredTeam): Promise<void> {
+  const path = `teams/${team.id}`;
   try {
     const leader = team.members.find((m) => m.isLeader) || team.members[0];
     const memberEmails = team.members.map((m) => m.email.trim().toLowerCase());
+    const safeSubmission = team.submission ? sanitizeSubmissionForFirestore(team.submission) : null;
+    const safeScreenshot =
+      team.paymentScreenshotUrl && team.paymentScreenshotUrl.length <= 350000
+        ? team.paymentScreenshotUrl
+        : '';
 
-    const docData = {
+    const docData = stripUndefined({
       id: team.id,
       teamName: team.teamName,
       college: team.college,
@@ -200,12 +218,16 @@ export async function saveTeamToFirestore(team: RegisteredTeam): Promise<void> {
       course: team.course,
       primaryTrack: team.primaryTrack,
       backupTrack: team.backupTrack || '',
+      track: team.track || '',
+      problemStatement: team.problemStatement || '',
       ideaTitle: team.ideaTitle || '',
       ideaSummary: team.ideaSummary || '',
       paymentStatus: team.paymentStatus,
       paymentTransactionId: team.paymentTransactionId || '',
+      paymentScreenshotUrl: safeScreenshot,
       paymentRemarks: team.paymentRemarks || '',
       registeredAt: team.registeredAt,
+      updatedAt: team.updatedAt || team.registeredAt || new Date().toISOString(),
       checkedIn: team.checkedIn,
       checkedInAt: team.checkedInAt || null,
       leaderEmail: (leader?.email || '').toLowerCase(),
@@ -214,75 +236,110 @@ export async function saveTeamToFirestore(team: RegisteredTeam): Promise<void> {
       members: JSON.stringify(team.members),
       mealCode: team.mealCode || '',
       mealLogs: Array.isArray(team.mealLogs) ? JSON.stringify(team.mealLogs) : null,
-      submission: team.submission ? JSON.stringify(team.submission) : null,
-    };
+      submission: safeSubmission ? JSON.stringify(safeSubmission) : null,
+    });
 
     const teamRef = doc(db, 'teams', team.id);
     await setDoc(teamRef, docData, { merge: true });
   } catch (err) {
-    console.warn('Firestore save warning:', err);
+    logFirestoreWarning(err, OperationType.WRITE, path);
   }
 }
 
 export async function updateTeamPaymentInFirestore(
   teamId: string,
   status: 'Pending' | 'Verified' | 'Rejected',
-  remarks?: string
+  remarks?: string,
+  updatedAt?: string
 ): Promise<void> {
+  const path = `teams/${teamId}`;
   try {
     const teamRef = doc(db, 'teams', teamId);
-    await updateDoc(teamRef, {
-      paymentStatus: status,
-      paymentRemarks: remarks !== undefined ? remarks : '',
-    });
+    await setDoc(
+      teamRef,
+      {
+        id: teamId,
+        paymentStatus: status,
+        paymentRemarks: remarks !== undefined ? remarks : '',
+        updatedAt: updatedAt || new Date().toISOString(),
+      },
+      { merge: true }
+    );
   } catch (err) {
-    console.warn('Firestore payment update warning:', err);
+    logFirestoreWarning(err, OperationType.UPDATE, path);
   }
 }
 
 export async function updateTeamCheckInInFirestore(
   teamId: string,
   checkedIn: boolean,
-  checkedInAt?: string
+  checkedInAt?: string,
+  updatedAt?: string
 ): Promise<void> {
+  const path = `teams/${teamId}`;
   try {
     const teamRef = doc(db, 'teams', teamId);
-    await updateDoc(teamRef, {
-      checkedIn,
-      checkedInAt: checkedInAt || null,
-    });
+    await setDoc(
+      teamRef,
+      {
+        id: teamId,
+        checkedIn,
+        checkedInAt: checkedInAt || null,
+        updatedAt: updatedAt || new Date().toISOString(),
+      },
+      { merge: true }
+    );
   } catch (err) {
-    console.warn('Firestore checkin update warning:', err);
+    logFirestoreWarning(err, OperationType.UPDATE, path);
   }
 }
 
 export async function updateTeamSubmissionInFirestore(
   teamId: string,
-  submission: ProjectSubmission
+  submission: ProjectSubmission,
+  updatedAt?: string
 ): Promise<void> {
+  const path = `teams/${teamId}`;
   try {
     const teamRef = doc(db, 'teams', teamId);
-    await updateDoc(teamRef, {
-      submission: JSON.stringify(submission),
-    });
+    const safeSubmission = sanitizeSubmissionForFirestore(submission);
+    await setDoc(
+      teamRef,
+      {
+        id: teamId,
+        submission: JSON.stringify(safeSubmission),
+        ideaTitle: safeSubmission.projectTitle || undefined,
+        ideaSummary: safeSubmission.ideaSummary || undefined,
+        updatedAt: updatedAt || new Date().toISOString(),
+      },
+      { merge: true }
+    );
   } catch (err) {
-    console.warn('Firestore submission update warning:', err);
+    logFirestoreWarning(err, OperationType.UPDATE, path);
   }
 }
 
 export async function updateTeamMealLogsInFirestore(
   teamId: string,
   mealCode: string,
-  mealLogs: MealScanRecord[]
+  mealLogs: MealScanRecord[],
+  updatedAt?: string
 ): Promise<void> {
+  const path = `teams/${teamId}`;
   try {
     const teamRef = doc(db, 'teams', teamId);
-    await updateDoc(teamRef, {
-      mealCode,
-      mealLogs: JSON.stringify(mealLogs),
-    });
+    await setDoc(
+      teamRef,
+      {
+        id: teamId,
+        mealCode,
+        mealLogs: JSON.stringify(mealLogs),
+        updatedAt: updatedAt || new Date().toISOString(),
+      },
+      { merge: true }
+    );
   } catch (err) {
-    console.warn('Firestore meal logs update warning:', err);
+    logFirestoreWarning(err, OperationType.UPDATE, path);
   }
 }
 
@@ -296,6 +353,60 @@ export async function deleteTeamFromFirestore(teamId: string): Promise<void> {
   }
 }
 
+function mapFirestoreDocToTeam(docId: string, data: Record<string, any>): RegisteredTeam {
+  let parsedMembers = [];
+  try {
+    parsedMembers = typeof data.members === 'string' ? JSON.parse(data.members) : data.members;
+  } catch {
+    parsedMembers = [];
+  }
+
+  let parsedSubmission: ProjectSubmission | undefined = undefined;
+  try {
+    if (data.submission) {
+      parsedSubmission = typeof data.submission === 'string' ? JSON.parse(data.submission) : data.submission;
+    }
+  } catch {
+    parsedSubmission = undefined;
+  }
+
+  let parsedMealLogs: MealScanRecord[] | undefined = undefined;
+  try {
+    if (data.mealLogs) {
+      parsedMealLogs = typeof data.mealLogs === 'string' ? JSON.parse(data.mealLogs) : data.mealLogs;
+    }
+  } catch {
+    parsedMealLogs = undefined;
+  }
+
+  return {
+    id: data.id || docId,
+    teamName: data.teamName || '',
+    college: data.college || '',
+    city: data.city || '',
+    department: data.department || '',
+    course: data.course || 'B.E / B.Tech',
+    primaryTrack: data.primaryTrack || '',
+    backupTrack: data.backupTrack || '',
+    track: data.track || undefined,
+    problemStatement: data.problemStatement || undefined,
+    ideaTitle: data.ideaTitle || '',
+    ideaSummary: data.ideaSummary || '',
+    paymentStatus: data.paymentStatus || 'Pending',
+    paymentTransactionId: data.paymentTransactionId || '',
+    paymentScreenshotUrl: typeof data.paymentScreenshotUrl === 'string' && data.paymentScreenshotUrl ? data.paymentScreenshotUrl : undefined,
+    paymentRemarks: data.paymentRemarks,
+    registeredAt: data.registeredAt || new Date().toISOString(),
+    updatedAt: typeof data.updatedAt === 'string' && data.updatedAt ? data.updatedAt : data.registeredAt,
+    checkedIn: Boolean(data.checkedIn),
+    checkedInAt: data.checkedInAt || undefined,
+    members: Array.isArray(parsedMembers) ? parsedMembers : [],
+    mealCode: typeof data.mealCode === 'string' && data.mealCode ? data.mealCode : undefined,
+    mealLogs: Array.isArray(parsedMealLogs) ? parsedMealLogs : undefined,
+    submission: parsedSubmission,
+  };
+}
+
 export async function fetchAllTeamsFromFirestore(): Promise<RegisteredTeam[]> {
   try {
     const colRef = collection(db, 'teams');
@@ -304,58 +415,14 @@ export async function fetchAllTeamsFromFirestore(): Promise<RegisteredTeam[]> {
 
     snapshot.forEach((docSnap) => {
       const data = docSnap.data();
-      let parsedMembers = [];
-      try {
-        parsedMembers = typeof data.members === 'string' ? JSON.parse(data.members) : data.members;
-      } catch {
-        parsedMembers = [];
+      if (data?.id || data?.teamName) {
+        teams.push(mapFirestoreDocToTeam(docSnap.id, data));
       }
-
-      let parsedSubmission: ProjectSubmission | undefined = undefined;
-      try {
-        if (data.submission) {
-          parsedSubmission = typeof data.submission === 'string' ? JSON.parse(data.submission) : data.submission;
-        }
-      } catch {
-        parsedSubmission = undefined;
-      }
-
-      let parsedMealLogs: MealScanRecord[] | undefined = undefined;
-      try {
-        if (data.mealLogs) {
-          parsedMealLogs = typeof data.mealLogs === 'string' ? JSON.parse(data.mealLogs) : data.mealLogs;
-        }
-      } catch {
-        parsedMealLogs = undefined;
-      }
-
-      teams.push({
-        id: data.id || docSnap.id,
-        teamName: data.teamName,
-        college: data.college,
-        city: data.city,
-        department: data.department,
-        course: data.course,
-        primaryTrack: data.primaryTrack,
-        backupTrack: data.backupTrack,
-        ideaTitle: data.ideaTitle,
-        ideaSummary: data.ideaSummary,
-        paymentStatus: data.paymentStatus || 'Pending',
-        paymentTransactionId: data.paymentTransactionId,
-        paymentRemarks: data.paymentRemarks,
-        registeredAt: data.registeredAt,
-        checkedIn: Boolean(data.checkedIn),
-        checkedInAt: data.checkedInAt,
-        members: Array.isArray(parsedMembers) ? parsedMembers : [],
-        mealCode: typeof data.mealCode === 'string' && data.mealCode ? data.mealCode : undefined,
-        mealLogs: Array.isArray(parsedMealLogs) ? parsedMealLogs : undefined,
-        submission: parsedSubmission,
-      });
     });
 
     return teams;
   } catch (err) {
-    console.warn('Firestore fetch teams warning:', err);
+    logFirestoreWarning(err, OperationType.LIST, 'teams');
     return [];
   }
 }
@@ -371,53 +438,9 @@ export function subscribeFirestoreTeams(
       const teams: RegisteredTeam[] = [];
       snapshot.forEach((docSnap) => {
         const data = docSnap.data();
-        let parsedMembers = [];
-        try {
-          parsedMembers = typeof data.members === 'string' ? JSON.parse(data.members) : data.members;
-        } catch {
-          parsedMembers = [];
+        if (data?.id || data?.teamName) {
+          teams.push(mapFirestoreDocToTeam(docSnap.id, data));
         }
-
-        let parsedSubmission: ProjectSubmission | undefined = undefined;
-        try {
-          if (data.submission) {
-            parsedSubmission = typeof data.submission === 'string' ? JSON.parse(data.submission) : data.submission;
-          }
-        } catch {
-          parsedSubmission = undefined;
-        }
-
-        let parsedMealLogs: MealScanRecord[] | undefined = undefined;
-        try {
-          if (data.mealLogs) {
-            parsedMealLogs = typeof data.mealLogs === 'string' ? JSON.parse(data.mealLogs) : data.mealLogs;
-          }
-        } catch {
-          parsedMealLogs = undefined;
-        }
-
-        teams.push({
-          id: data.id || docSnap.id,
-          teamName: data.teamName,
-          college: data.college,
-          city: data.city,
-          department: data.department,
-          course: data.course,
-          primaryTrack: data.primaryTrack,
-          backupTrack: data.backupTrack,
-          ideaTitle: data.ideaTitle,
-          ideaSummary: data.ideaSummary,
-          paymentStatus: data.paymentStatus || 'Pending',
-          paymentTransactionId: data.paymentTransactionId,
-          paymentRemarks: data.paymentRemarks,
-          registeredAt: data.registeredAt,
-          checkedIn: Boolean(data.checkedIn),
-          checkedInAt: data.checkedInAt,
-          members: Array.isArray(parsedMembers) ? parsedMembers : [],
-          mealCode: typeof data.mealCode === 'string' && data.mealCode ? data.mealCode : undefined,
-          mealLogs: Array.isArray(parsedMealLogs) ? parsedMealLogs : undefined,
-          submission: parsedSubmission,
-        });
       });
       // Sort newest first
       teams.sort((a, b) => new Date(b.registeredAt).getTime() - new Date(a.registeredAt).getTime());
@@ -595,7 +618,8 @@ export type SiteContentSection =
   | 'announcements'
   | 'core_team_index'
   | 'team_sections'
-  | 'deleted_teams';
+  | 'deleted_teams'
+  | 'submission_notifications';
 
 export interface SiteContentDoc<T = unknown> {
   section: SiteContentSection;

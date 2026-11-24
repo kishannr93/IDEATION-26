@@ -86,6 +86,7 @@ export interface RegisteredTeam {
   mealCode?: string;
   mealLogs?: MealScanRecord[];
   submission?: ProjectSubmission;
+  updatedAt?: string;
 }
 
 export interface DomainTrack {

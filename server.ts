@@ -30,6 +30,7 @@ const VALID_CONTENT_SECTIONS = [
   'core_team_index',
   'team_sections',
   'deleted_teams',
+  'submission_notifications',
 ] as const;
 type ContentSection = (typeof VALID_CONTENT_SECTIONS)[number];
 
@@ -119,6 +120,7 @@ export interface RegisteredTeamRecord {
   paymentScreenshotUrl?: string;
   paymentRemarks?: string;
   registeredAt: string;
+  updatedAt?: string;
   checkedIn: boolean;
   checkedInAt?: string;
   mealCode?: string;
@@ -225,6 +227,11 @@ async function dispatchEmail(to: string, subject: string, html: string) {
 
 // Email templates
 function buildRegistrationConfirmationEmail(team: RegisteredTeamRecord, leaderName: string) {
+  const cfg = readJsonFile<Record<string, any> | null>(CONFIG_FILE, null);
+  const eventDates = cfg?.dates || '1 & 2 December 2026';
+  const entryFee = cfg?.entryFee ?? 100;
+  const venue = cfg?.venue || 'BIET Main Campus, Davangere, Karnataka';
+
   return `
 <!DOCTYPE html>
 <html>
@@ -256,7 +263,7 @@ function buildRegistrationConfirmationEmail(team: RegisteredTeamRecord, leaderNa
     </div>
     <div class="details">
       <p>Hello <strong>${leaderName}</strong>,</p>
-      <p>Your team <strong>${team.teamName}</strong> from <strong>${team.college}</strong> has been successfully registered for IDEATION 2026 on 18 & 19 November 2026.</p>
+      <p>Your team <strong>${team.teamName}</strong> from <strong>${team.college}</strong> has been successfully registered for IDEATION 2026 on ${eventDates}.</p>
       
       <div style="background: #081024; border-radius: 12px; padding: 16px; margin: 16px 0;">
         <div class="field"><span class="field-label">Registration ID:</span><span class="field-value font-mono">${team.id}</span></div>
@@ -265,13 +272,13 @@ function buildRegistrationConfirmationEmail(team: RegisteredTeamRecord, leaderNa
         <div class="field"><span class="field-label">Primary Track:</span><span class="field-value">${team.primaryTrack}</span></div>
         <div class="field"><span class="field-label">Payment Status:</span><span class="field-value" style="color: #FFC83D;">${team.paymentStatus}</span></div>
         <div class="field"><span class="field-label">Transaction UTR:</span><span class="field-value font-mono">${team.paymentTransactionId}</span></div>
-        <div class="field"><span class="field-label">Venue:</span><span class="field-value">BIET Main Campus, Davangere, Karnataka</span></div>
-        <div class="field"><span class="field-label">Event Schedule:</span><span class="field-value">18 - 19 November 2026 (24-Hour Offline Hackathon)</span></div>
+        <div class="field"><span class="field-label">Venue:</span><span class="field-value">${venue}</span></div>
+        <div class="field"><span class="field-label">Event Schedule:</span><span class="field-value">${eventDates} (24-Hour Offline Hackathon)</span></div>
       </div>
 
       <div class="disclaimer">
         <strong>⚠️ IMPORTANT: Registration Does Not Constitute Payment Approval</strong><br>
-        Please note that submitting your registration does <em>not</em> mean your payment has been approved. The ₹100 team entry fee must be manually verified by the Anveshan finance desk against bank transaction records. Once verified, your status will update to <strong>Verified</strong> and your confirmed entry pass will become active in your participant dashboard.
+        Please note that submitting your registration does <em>not</em> mean your payment has been approved. The ₹${entryFee} team entry fee must be manually verified by the Anveshan finance desk against bank transaction records. Once verified, your status will update to <strong>Verified</strong> and your confirmed entry pass will become active in your participant dashboard.
       </div>
 
       <p style="font-size: 13px; color: #94A3B8;">You can track your live payment verification status anytime by logging in with your Team ID (<strong>${team.id}</strong>) or email on the IDEATION participant dashboard.</p>
@@ -287,6 +294,10 @@ function buildRegistrationConfirmationEmail(team: RegisteredTeamRecord, leaderNa
 }
 
 function buildPaymentApprovedEmail(team: RegisteredTeamRecord, leaderName: string) {
+  const cfg = readJsonFile<Record<string, any> | null>(CONFIG_FILE, null);
+  const eventDates = cfg?.dates || '1 & 2 December 2026';
+  const venue = cfg?.venue || 'BIET Main Campus, Davangere';
+
   return `
 <!DOCTYPE html>
 <html>
@@ -328,8 +339,8 @@ function buildPaymentApprovedEmail(team: RegisteredTeamRecord, leaderName: strin
         <div class="field"><span class="field-label">Team Name:</span><span class="field-value">${team.teamName}</span></div>
         <div class="field"><span class="field-label">College:</span><span class="field-value">${team.college}</span></div>
         <div class="field"><span class="field-label">Track:</span><span class="field-value">${team.primaryTrack}</span></div>
-        <div class="field"><span class="field-label">Check-in Reporting:</span><span class="field-value font-mono">18 Nov 2026, 08:00 AM</span></div>
-        <div class="field"><span class="field-label">Venue:</span><span class="field-value">BIET Main Campus, Davangere</span></div>
+        <div class="field"><span class="field-label">Check-in Reporting:</span><span class="field-value font-mono">${eventDates} (08:00 AM Reporting)</span></div>
+        <div class="field"><span class="field-label">Venue:</span><span class="field-value">${venue}</span></div>
       </div>
 
       <p style="font-size: 13px; color: #94A3B8;">Log in to your participant dashboard anytime to view and print your entry pass badge for check-in on event day.</p>
@@ -487,7 +498,8 @@ app.post('/api/teams', (req: Request, res: Response) => {
     paymentTransactionId: body.paymentTransactionId.trim(),
     paymentScreenshotUrl: body.paymentScreenshotUrl,
     paymentRemarks: body.paymentRemarks || 'Registration submitted with transaction verification pending.',
-    registeredAt: new Date().toISOString(),
+    registeredAt: body.registeredAt || new Date().toISOString(),
+    updatedAt: body.updatedAt || new Date().toISOString(),
     checkedIn: false,
     mealCode: body.mealCode || computeServerMealCode(teamId, body.teamName.trim()),
     mealLogs: [],
@@ -540,6 +552,7 @@ app.patch('/api/teams/:id/payment', (req: Request, res: Response) => {
   if (remarks !== undefined) {
     teams[idx].paymentRemarks = remarks;
   }
+  teams[idx].updatedAt = new Date().toISOString();
 
   writeDatabase(teams);
 
@@ -575,6 +588,28 @@ app.patch('/api/teams/:id/checkin', (req: Request, res: Response) => {
   const newStatus = explicitStatus !== undefined ? explicitStatus : !teams[idx].checkedIn;
   teams[idx].checkedIn = newStatus;
   teams[idx].checkedInAt = newStatus ? (teams[idx].checkedInAt || new Date().toISOString()) : undefined;
+  teams[idx].updatedAt = new Date().toISOString();
+
+  writeDatabase(teams);
+  return res.json({ success: true, data: teams[idx] });
+});
+
+// 5.00 GENERAL TEAM PROFILE / IDEA UPDATE
+app.patch('/api/teams/:id', (req: Request, res: Response) => {
+  const teamId = req.params.id.trim().toUpperCase();
+  const teams = readDatabase();
+  const idx = teams.findIndex(t => t.id.toUpperCase() === teamId);
+  if (idx === -1) {
+    return res.status(404).json({ success: false, error: `Team ${teamId} not found` });
+  }
+
+  const updates = (req.body && typeof req.body === 'object' ? req.body : {}) as Partial<RegisteredTeamRecord>;
+  const { id: _ignoreId, ...safeUpdates } = updates;
+  teams[idx] = {
+    ...teams[idx],
+    ...safeUpdates,
+    updatedAt: safeUpdates.updatedAt || new Date().toISOString(),
+  };
 
   writeDatabase(teams);
   return res.json({ success: true, data: teams[idx] });
@@ -591,6 +626,7 @@ app.delete('/api/teams/:id/checkin', (req: Request, res: Response) => {
 
   teams[idx].checkedIn = false;
   teams[idx].checkedInAt = undefined;
+  teams[idx].updatedAt = new Date().toISOString();
 
   writeDatabase(teams);
   return res.json({
@@ -732,6 +768,7 @@ app.post('/api/teams/:id/meal-scan', (req: Request, res: Response) => {
 
   team.mealCode = resolvedCode;
   team.mealLogs = [...existingLogs, scanRecord];
+  team.updatedAt = new Date().toISOString();
   writeDatabase(teams);
 
   const newScannedCount = targetMember ? scannedIds.size + 1 : members.length;
@@ -813,6 +850,7 @@ app.put('/api/teams/:id/submission', (req: Request, res: Response) => {
   };
 
   team.submission = updatedSubmission;
+  team.updatedAt = nowIso;
   if (updatedSubmission.projectTitle) {
     team.ideaTitle = updatedSubmission.projectTitle;
   }
@@ -874,6 +912,7 @@ app.patch('/api/teams/:id/evaluation', (req: Request, res: Response) => {
   team.submission.evaluatedBy = evaluatedBy || 'Jury Panel';
   team.submission.evaluatedAt = new Date().toISOString();
   team.submission.updatedAt = new Date().toISOString();
+  team.updatedAt = team.submission.updatedAt;
 
   writeDatabase(teams);
   return res.json({ success: true, data: team });
@@ -1042,6 +1081,7 @@ app.get('/api/sync/all', (_req: Request, res: Response) => {
   const coreTeamIndex = readOptionalJsonFile<{ section: string; items: any[]; updatedAt: string }>(getContentFilePath('core_team_index'));
   const teamSections = readOptionalJsonFile<{ section: string; items: any[]; updatedAt: string }>(getContentFilePath('team_sections'));
   const deletedTeamsSection = readOptionalJsonFile<{ section: string; items: any[]; updatedAt: string }>(getContentFilePath('deleted_teams'));
+  const submissionNotifications = readOptionalJsonFile<{ section: string; items: any[]; updatedAt: string }>(getContentFilePath('submission_notifications'));
 
   return res.json({
     success: true,
@@ -1060,6 +1100,7 @@ app.get('/api/sync/all', (_req: Request, res: Response) => {
     coreTeamIndex,
     teamSections,
     deletedTeamsSection,
+    submissionNotifications,
   });
 });
 
@@ -1078,6 +1119,7 @@ app.post('/api/sync/push-all', (req: Request, res: Response) => {
     faqs,
     teams,
     deletedTeamIds,
+    submissionNotifications,
   } = req.body || {};
 
   if (config && typeof config === 'object') {
@@ -1108,6 +1150,9 @@ app.post('/api/sync/push-all', (req: Request, res: Response) => {
   }
   if (Array.isArray(faqs)) {
     writeJsonFile(getContentFilePath('faqs'), { section: 'faqs', items: faqs, updatedAt: nowIso });
+  }
+  if (Array.isArray(submissionNotifications)) {
+    writeJsonFile(getContentFilePath('submission_notifications'), { section: 'submission_notifications', items: submissionNotifications, updatedAt: nowIso });
   }
   if (Array.isArray(deletedTeamIds)) {
     const normalized = Array.from(new Set(deletedTeamIds.map((id: any) => String(id).toUpperCase())));
