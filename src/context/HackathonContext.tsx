@@ -27,6 +27,7 @@ import {
   initialFAQs,
   initialRegisteredTeams,
 } from '../data/initialData';
+import { restoredTeamsSeed } from '../data/restoredTeams';
 import {
   signInWithGoogle,
   signOutGoogle,
@@ -332,20 +333,56 @@ export const HackathonProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   });
 
   const [registeredTeams, setRegisteredTeams] = useState<RegisteredTeam[]>(() => {
+    let deletedSet = new Set<string>();
+    try {
+      const savedDeleted = localStorage.getItem('ideation_deleted_teams');
+      const deletedIds: string[] = savedDeleted ? JSON.parse(savedDeleted) : [];
+      if (Array.isArray(deletedIds)) {
+        deletedSet = new Set(deletedIds.map((id) => String(id).toUpperCase()));
+      }
+    } catch {}
+
+    const map = new Map<string, RegisteredTeam>();
+    for (const seedTeam of restoredTeamsSeed) {
+      if (seedTeam?.id && !deletedSet.has(seedTeam.id.toUpperCase())) {
+        map.set(seedTeam.id.toUpperCase(), seedTeam);
+      }
+    }
+
     const saved = localStorage.getItem('ideation_registered_teams_prod');
     if (saved) {
       try {
         const parsed = JSON.parse(saved);
-        if (!Array.isArray(parsed)) return [];
-        const savedDeleted = localStorage.getItem('ideation_deleted_teams');
-        const deletedIds: string[] = savedDeleted ? JSON.parse(savedDeleted) : [];
-        const deletedSet = new Set(Array.isArray(deletedIds) ? deletedIds.map((id) => String(id).toUpperCase()) : []);
-        return parsed.filter((t) => t?.id && !deletedSet.has(String(t.id).toUpperCase()));
-      } catch {
-        return [];
-      }
+        if (Array.isArray(parsed)) {
+          for (const cachedTeam of parsed) {
+            if (!cachedTeam?.id) continue;
+            const normId = String(cachedTeam.id).toUpperCase();
+            if (deletedSet.has(normId)) continue;
+            const existing = map.get(normId);
+            if (!existing) {
+              map.set(normId, cachedTeam);
+            } else {
+              const cTs = Date.parse(cachedTeam.updatedAt || cachedTeam.registeredAt || '') || 0;
+              const sTs = Date.parse(existing.updatedAt || existing.registeredAt || '') || 0;
+              if (cTs >= sTs) {
+                map.set(normId, {
+                  ...cachedTeam,
+                  mealCode: cachedTeam.mealCode || existing.mealCode,
+                  mealLogs:
+                    Array.isArray(cachedTeam.mealLogs) && cachedTeam.mealLogs.length > 0
+                      ? cachedTeam.mealLogs
+                      : existing.mealLogs,
+                });
+              }
+            }
+          }
+        }
+      } catch {}
     }
-    return [];
+
+    return Array.from(map.values()).sort(
+      (a, b) => new Date(b.registeredAt).getTime() - new Date(a.registeredAt).getTime()
+    );
   });
 
   const [isSyncingAll, setIsSyncingAll] = useState<boolean>(false);
@@ -963,7 +1000,7 @@ export const HackathonProvider: React.FC<{ children: React.ReactNode }> = ({ chi
 
     try {
       const [snapshot, srvJson] = await Promise.all([
-        fetchAllFromFirestore().catch(() => null),
+        fetchAllFromFirestore(explicitFetch).catch(() => null),
         fetch('/api/sync/all')
           .then((r) => (r.ok ? r.json() : null))
           .catch(() => null),
@@ -1194,47 +1231,60 @@ export const HackathonProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         applyCoreTeamSnapshot(fsCoreMembers.length > 0 ? fsCoreMembers : srvCoreMembers, true);
       }
 
-      // 5. Registered Teams (timestamp-reconciled union across Firestore & Express)
+      // 5. Registered Teams (timestamp-reconciled union across Restored CSV Baseline, Express & Firestore)
+      const fsTeamsLoaded = Boolean(snapshot?.teamsLoadedOk && !snapshot?.quotaExceeded);
       const fsTeams = (snapshot?.teams || []).filter((t) => t?.id && !deletedSet.has(t.id.toUpperCase()));
       const srvTeams: RegisteredTeam[] = (Array.isArray(srv?.teams) ? srv.teams : []).filter(
         (t: RegisteredTeam) => t?.id && !deletedSet.has(t.id.toUpperCase())
       );
+      const baselineTeams = restoredTeamsSeed.filter((t) => t?.id && !deletedSet.has(t.id.toUpperCase()));
 
-      const fsTeamMap = new Map<string, RegisteredTeam>(fsTeams.map((t) => [t.id, t]));
-      const srvTeamMap = new Map<string, RegisteredTeam>(srvTeams.map((t) => [t.id, t]));
-      const allTeamIds = new Set<string>([...fsTeamMap.keys(), ...srvTeamMap.keys()]);
+      const baselineMap = new Map<string, RegisteredTeam>(baselineTeams.map((t) => [t.id.toUpperCase(), t]));
+      const fsTeamMap = new Map<string, RegisteredTeam>(fsTeams.map((t) => [t.id.toUpperCase(), t]));
+      const srvTeamMap = new Map<string, RegisteredTeam>(srvTeams.map((t) => [t.id.toUpperCase(), t]));
+      const allTeamIds = new Set<string>([
+        ...baselineMap.keys(),
+        ...fsTeamMap.keys(),
+        ...srvTeamMap.keys(),
+      ]);
       const reconciledTeams: RegisteredTeam[] = [];
 
-      allTeamIds.forEach((teamId) => {
-        const fsT = fsTeamMap.get(teamId);
-        const srvT = srvTeamMap.get(teamId);
-        if (fsT && srvT) {
-          const merged = mergeTeamRecord(fsT, srvT);
-          reconciledTeams.push(merged);
-          const fsMs = getTeamLatestTimestampMs(fsT);
-          const srvMs = getTeamLatestTimestampMs(srvT);
-          if (srvMs > fsMs) {
-            firestorePromotePromises.push(saveTeamToFirestore(merged));
-          } else if (fsMs > srvMs) {
-            needsServerMirror = true;
-          }
-        } else if (fsT) {
-          reconciledTeams.push(fsT);
+      allTeamIds.forEach((normId) => {
+        const baseT = baselineMap.get(normId);
+        const fsT = fsTeamMap.get(normId);
+        const srvT = srvTeamMap.get(normId);
+
+        let merged: RegisteredTeam | undefined = baseT;
+        if (srvT) {
+          merged = merged ? mergeTeamRecord(srvT, merged) : srvT;
+        }
+        if (fsT) {
+          merged = merged ? mergeTeamRecord(fsT, merged) : fsT;
+        }
+        if (!merged) return;
+
+        reconciledTeams.push(merged);
+
+        const fsMs = getTeamLatestTimestampMs(fsT);
+        const srvMs = getTeamLatestTimestampMs(srvT);
+        const mergedMs = getTeamLatestTimestampMs(merged);
+
+        if (fsTeamsLoaded && (!fsT || mergedMs > fsMs)) {
+          firestorePromotePromises.push(saveTeamToFirestore(merged));
+        }
+        if (!srvT || mergedMs > srvMs) {
           needsServerMirror = true;
-        } else if (srvT) {
-          reconciledTeams.push(srvT);
-          firestorePromotePromises.push(saveTeamToFirestore(srvT));
         }
       });
 
-      if (reconciledTeams.length > 0 || snapshot !== null) {
-        applyTeamsSnapshot(reconciledTeams, true);
+      if (reconciledTeams.length > 0) {
+        applyTeamsSnapshot(reconciledTeams, fsTeamsLoaded);
         if (needsServerMirror) {
           serverMirrorPayload.teams = reconciledTeams;
         }
       }
 
-      if (firestorePromotePromises.length > 0) {
+      if (firestorePromotePromises.length > 0 && !snapshot?.quotaExceeded) {
         await Promise.all(firestorePromotePromises).catch(() => {});
       }
       if (needsServerMirror && Object.keys(serverMirrorPayload).length > 0) {
@@ -1353,23 +1403,20 @@ export const HackathonProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       }
     };
 
-    // Initial load: run full two-way cloud + server reconciliation immediately
+    // Initial load: run full two-way cloud + server reconciliation once on mount
     refreshAllFromCloud(false);
 
-    // Live polling every 4s for same-server updates + 15s full cloud refresh fallback
-    const pollTimer = setInterval(syncWithCentralDatabase, 4000);
-    const cloudRefreshTimer = setInterval(() => {
-      if (isMounted) refreshAllFromCloud(false);
-    }, 15000);
+    // Lightweight server polling every 8s (0 Firestore reads; real-time Firestore listeners handle instant cloud pushes)
+    const pollTimer = setInterval(syncWithCentralDatabase, 8000);
 
-    // Refresh immediately whenever tab gains focus, becomes visible, or network reconnects
+    // Refresh from Express central DB whenever tab gains focus, becomes visible, or network reconnects
     const handleVisibilityOrFocus = () => {
       if (document.visibilityState === 'visible' && isMounted) {
-        refreshAllFromCloud(false);
+        syncWithCentralDatabase();
       }
     };
     const handleOnline = () => {
-      if (isMounted) refreshAllFromCloud(false);
+      if (isMounted) syncWithCentralDatabase();
     };
     const handleOffline = () => {
       if (isMounted) setSyncStatus('offline');
@@ -1385,7 +1432,7 @@ export const HackathonProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       channel = new BroadcastChannel('ideation_live_sync');
       channel.onmessage = () => {
         if (isMounted) {
-          refreshAllFromCloud(false);
+          syncWithCentralDatabase();
         }
       };
     } catch {}
@@ -1393,14 +1440,13 @@ export const HackathonProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     return () => {
       isMounted = false;
       clearInterval(pollTimer);
-      clearInterval(cloudRefreshTimer);
       window.removeEventListener('focus', handleVisibilityOrFocus);
       document.removeEventListener('visibilitychange', handleVisibilityOrFocus);
       window.removeEventListener('online', handleOnline);
       window.removeEventListener('offline', handleOffline);
       channel?.close();
     };
-  }, [currentTeamSession?.id]);
+  }, []);
 
   const updateEventConfig = (newConfig: Partial<EventConfig>) => {
     const nowIso = new Date().toISOString();

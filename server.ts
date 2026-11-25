@@ -142,19 +142,232 @@ function computeServerMealCode(teamId: string, teamName: string): string {
   return `MEAL-${cleanId}-${suffix}`;
 }
 
-// Read database from central JSON file
+const CSV_BASELINE_CANDIDATES = [
+  path.resolve(__dirname, 'public', 'assets', 'aistudio', 'IDEATION_2026_Registrations_2026-11-24_6797e394.csv'),
+  path.resolve(process.cwd(), 'public', 'assets', 'aistudio', 'IDEATION_2026_Registrations_2026-11-24_6797e394.csv'),
+];
+
+function parseRfc4180Csv(text: string): string[][] {
+  const clean = text.replace(/^\uFEFF/, '');
+  const rows: string[][] = [];
+  let row: string[] = [];
+  let field = '';
+  let inQuotes = false;
+
+  for (let i = 0; i < clean.length; i++) {
+    const ch = clean[i];
+    if (inQuotes) {
+      if (ch === '"') {
+        if (clean[i + 1] === '"') {
+          field += '"';
+          i++;
+        } else {
+          inQuotes = false;
+        }
+      } else {
+        field += ch;
+      }
+    } else {
+      if (ch === '"') {
+        inQuotes = true;
+      } else if (ch === ',') {
+        row.push(field);
+        field = '';
+      } else if (ch === '\r') {
+        // skip CR
+      } else if (ch === '\n') {
+        row.push(field);
+        if (row.some((c) => c !== '')) rows.push(row);
+        row = [];
+        field = '';
+      } else {
+        field += ch;
+      }
+    }
+  }
+  if (field !== '' || row.length > 0) {
+    row.push(field);
+    if (row.some((c) => c !== '')) rows.push(row);
+  }
+  return rows;
+}
+
+function loadBaselineTeamsFromCsv(): RegisteredTeamRecord[] {
+  const csvPath = CSV_BASELINE_CANDIDATES.find((p) => fs.existsSync(p));
+  if (!csvPath) return [];
+
+  try {
+    const raw = fs.readFileSync(csvPath, 'utf-8');
+    const rows = parseRfc4180Csv(raw);
+    if (rows.length <= 1) return [];
+
+    const deletedIds = new Set(
+      readJsonFile<string[]>(DELETED_TEAMS_FILE, []).map((id) => String(id).trim().toUpperCase())
+    );
+    const seenIds = new Set<string>();
+    const baseline: RegisteredTeamRecord[] = [];
+
+    for (const cols of rows.slice(1)) {
+      const get = (idx: number) => (cols[idx] ?? '').trim();
+      const id = get(0).toUpperCase();
+      if (!id || seenIds.has(id) || deletedIds.has(id)) continue;
+      seenIds.add(id);
+
+      const teamName = get(1);
+      const rawCourse = get(5);
+      const course: 'B.E / B.Tech' | 'M.Tech' | 'MCA' =
+        rawCourse === 'M.Tech' || rawCourse === 'MCA' ? rawCourse : 'B.E / B.Tech';
+      const rawPay = get(10);
+      const paymentStatus: 'Pending' | 'Verified' | 'Rejected' =
+        rawPay === 'Verified' || rawPay === 'Rejected' ? rawPay : 'Pending';
+      const registeredAt = get(13) || new Date().toISOString();
+
+      const members: TeamMemberRecord[] = [];
+      for (let mIdx = 0; mIdx < 4; mIdx++) {
+        const base = 15 + mIdx * 6;
+        const name = get(base);
+        const email = get(base + 1);
+        const phone = get(base + 2);
+        const usn = get(base + 3);
+        const branch = get(base + 4);
+        const year = get(base + 5);
+        if (name || email || usn) {
+          members.push({
+            id: `${id.toLowerCase()}-m${mIdx + 1}`,
+            name,
+            email,
+            phone,
+            usn: usn.toUpperCase(),
+            branch,
+            year,
+            isLeader: mIdx === 0,
+          });
+        }
+      }
+
+      baseline.push({
+        id,
+        teamName,
+        college: get(2),
+        city: get(3),
+        department: get(4),
+        course,
+        members,
+        primaryTrack: get(6),
+        backupTrack: get(7),
+        ideaTitle: get(8),
+        ideaSummary: get(9),
+        paymentStatus,
+        paymentTransactionId: get(11),
+        paymentRemarks:
+          paymentStatus === 'Verified'
+            ? 'Payment verified by Anveshan Finance Desk.'
+            : paymentStatus === 'Rejected'
+            ? 'Payment rejected.'
+            : 'Registration submitted with transaction verification pending.',
+        registeredAt,
+        updatedAt: registeredAt,
+        checkedIn: get(12).toLowerCase() === 'yes',
+        mealCode: computeServerMealCode(id, teamName),
+        mealLogs: [],
+      });
+    }
+
+    baseline.sort((a, b) => new Date(b.registeredAt).getTime() - new Date(a.registeredAt).getTime());
+    return baseline;
+  } catch (err) {
+    console.error('Failed parsing baseline CSV:', err);
+    return [];
+  }
+}
+
+function getRecordLatestMsServer(t?: RegisteredTeamRecord): number {
+  if (!t) return 0;
+  const dates = [
+    t.updatedAt,
+    t.registeredAt,
+    t.checkedInAt,
+    t.submission?.evaluatedAt,
+    t.submission?.updatedAt,
+    t.submission?.submittedAt,
+    ...(Array.isArray(t.mealLogs) ? t.mealLogs.map((l) => l.scannedAt) : []),
+  ];
+  let maxMs = 0;
+  for (const d of dates) {
+    if (typeof d === 'string' && d) {
+      const ms = Date.parse(d);
+      if (!Number.isNaN(ms) && ms > maxMs) maxMs = ms;
+    }
+  }
+  return maxMs;
+}
+
+function mergeTeamListsServer(
+  primary: RegisteredTeamRecord[],
+  secondary: RegisteredTeamRecord[],
+  deletedSet: Set<string>
+): RegisteredTeamRecord[] {
+  const map = new Map<string, RegisteredTeamRecord>();
+  const upsert = (incoming: RegisteredTeamRecord) => {
+    if (!incoming?.id) return;
+    const normId = incoming.id.trim().toUpperCase();
+    if (deletedSet.has(normId)) return;
+    const existing = map.get(normId);
+    if (!existing) {
+      map.set(normId, incoming);
+      return;
+    }
+    const incMs = getRecordLatestMsServer(incoming);
+    const extMs = getRecordLatestMsServer(existing);
+    const winner = incMs >= extMs ? incoming : existing;
+    const loser = winner === incoming ? existing : incoming;
+    const logsMap = new Map<string, MealScanRecordServer>();
+    for (const l of [...(existing.mealLogs || []), ...(incoming.mealLogs || [])]) {
+      if (l?.scannedAt) {
+        const k = l.id || `${l.day}::${l.mealType}::${l.memberId || 'ALL'}::${l.scannedAt}`;
+        if (!logsMap.has(k)) logsMap.set(k, l);
+      }
+    }
+    const mergedLogs = Array.from(logsMap.values()).sort(
+      (a, b) => Date.parse(a.scannedAt) - Date.parse(b.scannedAt)
+    );
+    map.set(normId, {
+      ...winner,
+      paymentScreenshotUrl: winner.paymentScreenshotUrl || loser.paymentScreenshotUrl,
+      mealCode: winner.mealCode || loser.mealCode || computeServerMealCode(winner.id, winner.teamName),
+      mealLogs: mergedLogs,
+      submission: winner.submission || loser.submission,
+    });
+  };
+  primary.forEach(upsert);
+  secondary.forEach(upsert);
+  return Array.from(map.values()).sort(
+    (a, b) => new Date(b.registeredAt).getTime() - new Date(a.registeredAt).getTime()
+  );
+}
+
+// Read database from central JSON file (auto-seeds from bundled CSV if empty)
 function readDatabase(): RegisteredTeamRecord[] {
   try {
     if (!fs.existsSync(DB_FILE)) {
-      fs.writeFileSync(DB_FILE, JSON.stringify([], null, 2), 'utf-8');
-      return [];
+      const seeded = loadBaselineTeamsFromCsv();
+      fs.writeFileSync(DB_FILE, JSON.stringify(seeded, null, 2), 'utf-8');
+      return seeded;
     }
     const raw = fs.readFileSync(DB_FILE, 'utf-8');
     const parsed = JSON.parse(raw);
+    if (Array.isArray(parsed) && parsed.length > 0) {
+      return parsed;
+    }
+    const seeded = loadBaselineTeamsFromCsv();
+    if (seeded.length > 0) {
+      writeDatabase(seeded);
+      return seeded;
+    }
     return Array.isArray(parsed) ? parsed : [];
   } catch (err) {
     console.error('Error reading central database:', err);
-    return [];
+    return loadBaselineTeamsFromCsv();
   }
 }
 
@@ -1164,14 +1377,33 @@ app.post('/api/sync/push-all', (req: Request, res: Response) => {
       (Array.isArray(deletedTeamIds) ? deletedTeamIds : readJsonFile<string[]>(DELETED_TEAMS_FILE, []))
         .map((id: any) => String(id).toUpperCase())
     );
-    const cleanedTeams = teams.filter((t: any) => t?.id && !deletedSet.has(String(t.id).toUpperCase()));
-    writeDatabase(cleanedTeams);
+    const existingTeams = readDatabase();
+    const cleanedIncoming = teams.filter((t: any) => t?.id && !deletedSet.has(String(t.id).toUpperCase()));
+    const mergedTeams = mergeTeamListsServer(existingTeams, cleanedIncoming, deletedSet);
+    writeDatabase(mergedTeams);
   }
 
   return res.json({
     success: true,
     timestamp: nowIso,
     message: 'All website configuration, rules, schedule, announcements, core team, and teams synced.',
+  });
+});
+
+// 5.12 EXPLICIT BASELINE CSV MERGE RESTORE
+app.post('/api/teams/restore-baseline', (_req: Request, res: Response) => {
+  const deletedSet = new Set(
+    readJsonFile<string[]>(DELETED_TEAMS_FILE, []).map((id) => String(id).toUpperCase())
+  );
+  const existing = readDatabase();
+  const baseline = loadBaselineTeamsFromCsv();
+  const merged = mergeTeamListsServer(baseline, existing, deletedSet);
+  writeDatabase(merged);
+  return res.json({
+    success: true,
+    count: merged.length,
+    data: merged,
+    message: `Merged ${baseline.length} CSV baseline teams cleanly.`,
   });
 });
 

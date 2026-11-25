@@ -91,11 +91,30 @@ export function handleFirestoreError(
   throw new Error(JSON.stringify(errInfo));
 }
 
+// Circuit breaker for Firestore daily free-tier quota errors so polling/retries back off cleanly
+let firestoreQuotaExhaustedUntilMs = 0;
+
+export function isFirestoreQuotaExhausted(): boolean {
+  return Date.now() < firestoreQuotaExhaustedUntilMs;
+}
+
+export function isQuotaError(error: unknown): boolean {
+  const msg = (error instanceof Error ? error.message : String(error || '')).toLowerCase();
+  return (
+    msg.includes('quota exceeded') ||
+    msg.includes('resource-exhausted') ||
+    msg.includes('resource_exhausted')
+  );
+}
+
 function logFirestoreWarning(
   error: unknown,
   operationType: OperationType,
   path: string | null
 ) {
+  if (isQuotaError(error)) {
+    firestoreQuotaExhaustedUntilMs = Date.now() + 10 * 60 * 1000;
+  }
   const errInfo = buildFirestoreErrorInfo(error, operationType, path);
   console.warn('Firestore Sync Warning: ', JSON.stringify(errInfo));
 }
@@ -407,7 +426,11 @@ function mapFirestoreDocToTeam(docId: string, data: Record<string, any>): Regist
   };
 }
 
-export async function fetchAllTeamsFromFirestore(): Promise<RegisteredTeam[]> {
+export async function fetchAllTeamsFromFirestoreWithStatus(): Promise<{
+  teams: RegisteredTeam[];
+  ok: boolean;
+  quotaExceeded: boolean;
+}> {
   try {
     const colRef = collection(db, 'teams');
     const snapshot = await getDocs(colRef);
@@ -420,11 +443,17 @@ export async function fetchAllTeamsFromFirestore(): Promise<RegisteredTeam[]> {
       }
     });
 
-    return teams;
+    return { teams, ok: true, quotaExceeded: false };
   } catch (err) {
+    const quota = isQuotaError(err);
     logFirestoreWarning(err, OperationType.LIST, 'teams');
-    return [];
+    return { teams: [], ok: false, quotaExceeded: quota };
   }
+}
+
+export async function fetchAllTeamsFromFirestore(): Promise<RegisteredTeam[]> {
+  const res = await fetchAllTeamsFromFirestoreWithStatus();
+  return res.teams;
 }
 
 export function subscribeFirestoreTeams(
@@ -674,47 +703,72 @@ export function subscribeFirestoreSiteContent<T>(
 
 export interface FullFirestoreSnapshot {
   teams: RegisteredTeam[];
+  teamsLoadedOk: boolean;
+  configLoadedOk: boolean;
+  sectionsLoadedOk: boolean;
+  coreLoadedOk: boolean;
+  announcementsLoadedOk: boolean;
+  quotaExceeded: boolean;
   config: Partial<EventConfig> | null;
   coreTeam: CoreTeamMember[];
   announcements: Announcement[];
   sections: Partial<Record<SiteContentSection, SiteContentDoc<any>>>;
 }
 
-export async function fetchAllFromFirestore(): Promise<FullFirestoreSnapshot> {
+export async function fetchAllFromFirestore(forceRetry = false): Promise<FullFirestoreSnapshot> {
   const result: FullFirestoreSnapshot = {
     teams: [],
+    teamsLoadedOk: false,
+    configLoadedOk: false,
+    sectionsLoadedOk: false,
+    coreLoadedOk: false,
+    announcementsLoadedOk: false,
+    quotaExceeded: isFirestoreQuotaExhausted(),
     config: null,
     coreTeam: [],
     announcements: [],
     sections: {},
   };
 
+  if (!forceRetry && isFirestoreQuotaExhausted()) {
+    return result;
+  }
+
   try {
-    const [teamsList, configSnap, contentSnap, coreSnap, annSnap] = await Promise.all([
-      fetchAllTeamsFromFirestore(),
+    const [teamsRes, configSnap, contentSnap, coreSnap, annSnap] = await Promise.all([
+      fetchAllTeamsFromFirestoreWithStatus(),
       getDocs(collection(db, 'site_config')).catch((err) => {
+        if (isQuotaError(err)) result.quotaExceeded = true;
         logFirestoreWarning(err, OperationType.LIST, 'site_config');
         return null;
       }),
       getDocs(collection(db, 'site_content')).catch((err) => {
+        if (isQuotaError(err)) result.quotaExceeded = true;
         logFirestoreWarning(err, OperationType.LIST, 'site_content');
         return null;
       }),
       getDocs(collection(db, 'core_team')).catch((err) => {
+        if (isQuotaError(err)) result.quotaExceeded = true;
         logFirestoreWarning(err, OperationType.LIST, 'core_team');
         return null;
       }),
       getDocs(collection(db, 'announcements')).catch((err) => {
+        if (isQuotaError(err)) result.quotaExceeded = true;
         logFirestoreWarning(err, OperationType.LIST, 'announcements');
         return null;
       }),
     ]);
 
-    result.teams = teamsList.sort(
+    if (teamsRes.quotaExceeded) {
+      result.quotaExceeded = true;
+    }
+    result.teamsLoadedOk = teamsRes.ok;
+    result.teams = teamsRes.teams.sort(
       (a, b) => new Date(b.registeredAt).getTime() - new Date(a.registeredAt).getTime()
     );
 
     if (configSnap) {
+      result.configLoadedOk = true;
       configSnap.forEach((docSnap) => {
         if (docSnap.id === 'event_config') {
           result.config = docSnap.data() as Partial<EventConfig>;
@@ -723,6 +777,7 @@ export async function fetchAllFromFirestore(): Promise<FullFirestoreSnapshot> {
     }
 
     if (contentSnap) {
+      result.sectionsLoadedOk = true;
       contentSnap.forEach((docSnap) => {
         const data = docSnap.data();
         const section = docSnap.id as SiteContentSection;
@@ -737,6 +792,7 @@ export async function fetchAllFromFirestore(): Promise<FullFirestoreSnapshot> {
     }
 
     if (coreSnap) {
+      result.coreLoadedOk = true;
       const members: CoreTeamMember[] = [];
       coreSnap.forEach((docSnap) => {
         const d = docSnap.data();
@@ -757,6 +813,7 @@ export async function fetchAllFromFirestore(): Promise<FullFirestoreSnapshot> {
     }
 
     if (annSnap) {
+      result.announcementsLoadedOk = true;
       const items: Announcement[] = [];
       annSnap.forEach((docSnap) => {
         const d = docSnap.data();
@@ -780,6 +837,7 @@ export async function fetchAllFromFirestore(): Promise<FullFirestoreSnapshot> {
       result.announcements = items;
     }
   } catch (err) {
+    if (isQuotaError(err)) result.quotaExceeded = true;
     logFirestoreWarning(err, OperationType.GET, 'full_sync');
   }
 
